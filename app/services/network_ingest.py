@@ -181,9 +181,7 @@ def acknowledge_command(
     node: FranchiseNode,
     command_public_id: str,
 ) -> dict[str, Any]:
-    command = db.scalar(
-        select(NodeCommand).where(NodeCommand.public_id == command_public_id)
-    )
+    command = db.scalar(select(NodeCommand).where(NodeCommand.public_id == command_public_id))
     if command is None:
         raise NetworkIngestError(404, "COMMAND_NOT_FOUND", "The command was not found.")
     if command.target_franchise_id != node.id:
@@ -202,22 +200,16 @@ def _find_serial_and_stock(
     db: Session,
     serial_number: str,
 ) -> tuple[Serial | None, NetworkStock | None]:
-    serial = db.scalar(
-        select(Serial).where(Serial.serial_number == serial_number)
-    )
+    serial = db.scalar(select(Serial).where(Serial.serial_number == serial_number))
     if serial is None:
         return None, None
-    stock = db.scalar(
-        select(NetworkStock).where(NetworkStock.serial_id == serial.id)
-    )
+    stock = db.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
     return serial, stock
 
 
 def _ensure_product(db: Session, node: FranchiseNode, item: NetworkEventItem) -> Product:
     product_code = _namespaced_code(node, item.product_code)
-    product = db.scalar(
-        select(Product).where(Product.product_code == product_code)
-    )
+    product = db.scalar(select(Product).where(Product.product_code == product_code))
     if product is None:
         product = Product(
             product_code=product_code,
@@ -381,20 +373,13 @@ def _replacement_snapshot_event(
             "QR_REPLACEMENT requires exactly one old serial and one new serial.",
         )
 
-    resolved = [
-        (item, *_find_serial_and_stock(db, item.serial_number))
-        for item in event.items
-    ]
+    resolved = [(item, *_find_serial_and_stock(db, item.serial_number)) for item in event.items]
     old_candidates = [
         (item, serial, stock)
         for item, serial, stock in resolved
         if serial is not None and stock is not None
     ]
-    new_candidates = [
-        item
-        for item, serial, stock in resolved
-        if serial is None and stock is None
-    ]
+    new_candidates = [item for item, serial, stock in resolved if serial is None and stock is None]
     if len(old_candidates) != 1 or len(new_candidates) != 1:
         raise NetworkIngestError(
             409,
@@ -413,10 +398,7 @@ def _replacement_snapshot_event(
             "STOCK_OWNERSHIP_CONFLICT",
             f"Serial {old_serial.serial_number} is owned by another franchise.",
         )
-    if (
-        not old_serial.active
-        or old_stock.status not in REPLACEABLE_SNAPSHOT_STATUSES
-    ):
+    if not old_serial.active or old_stock.status not in REPLACEABLE_SNAPSHOT_STATUSES:
         raise NetworkIngestError(
             409,
             "INVALID_REPLACEMENT_TRANSITION",
@@ -441,10 +423,7 @@ def _replacement_snapshot_event(
         raise NetworkIngestError(
             409,
             "INVALID_REPLACEMENT_TRANSITION",
-            (
-                f"The replacement for {old_stock.status} stock must start as "
-                f"{target_status}."
-            ),
+            (f"The replacement for {old_stock.status} stock must start as {target_status}."),
         )
 
     origin = _snapshot_origin(db, old_stock)
@@ -855,9 +834,7 @@ def _dispatch_transfer(
             "That transfer reference has already been used.",
         )
     public_id = _transfer_id(event)
-    if db.scalar(
-        select(StockTransfer.id).where(StockTransfer.public_id == public_id)
-    ) is not None:
+    if db.scalar(select(StockTransfer.id).where(StockTransfer.public_id == public_id)) is not None:
         raise NetworkIngestError(
             409,
             "TRANSFER_ID_CONFLICT",
@@ -965,10 +942,7 @@ def _receive_transfer(
             "This transfer has already been received in full.",
         )
 
-    transfer_items = {
-        item.serial.serial_number: item
-        for item in transfer.items
-    }
+    transfer_items = {item.serial.serial_number: item for item in transfer.items}
     received_serials: list[str] = []
     for event_item in event.items:
         transfer_item = transfer_items.get(event_item.serial_number)
@@ -985,9 +959,7 @@ def _receive_transfer(
                 f"Serial {event_item.serial_number} was already received.",
             )
         serial = transfer_item.serial
-        stock = db.scalar(
-            select(NetworkStock).where(NetworkStock.serial_id == serial.id)
-        )
+        stock = db.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
         if (
             stock is None
             or stock.current_franchise_id != transfer.source_franchise_id
@@ -1014,14 +986,9 @@ def _receive_transfer(
         _update_serial_snapshot(serial, node, event_item)
         received_serials.append(serial.serial_number)
 
-    all_received = all(
-        item.received_quantity >= item.quantity
-        for item in transfer.items
-    )
+    all_received = all(item.received_quantity >= item.quantity for item in transfer.items)
     transfer.status = (
-        TransferStatus.RECEIVED.value
-        if all_received
-        else TransferStatus.PARTIALLY_RECEIVED.value
+        TransferStatus.RECEIVED.value if all_received else TransferStatus.PARTIALLY_RECEIVED.value
     )
     transfer.updated_at = utc_now()
     if all_received:
@@ -1096,9 +1063,7 @@ def ingest_events(
         payload_json, payload_hash = _event_payload(event)
         event_id = _event_id(event)
 
-        existing_id = db.scalar(
-            select(InboundEvent).where(InboundEvent.event_id == event_id)
-        )
+        existing_id = db.scalar(select(InboundEvent).where(InboundEvent.event_id == event_id))
         if existing_id is not None:
             if existing_id.franchise_id != locked_node.id:
                 raise NetworkIngestError(
@@ -1130,11 +1095,7 @@ def ingest_events(
 
         expected_sequence = locked_node.last_sequence + 1
         if event.sequence != expected_sequence:
-            code = (
-                "SEQUENCE_GAP"
-                if event.sequence > expected_sequence
-                else "SEQUENCE_STALE"
-            )
+            code = "SEQUENCE_GAP" if event.sequence > expected_sequence else "SEQUENCE_STALE"
             raise NetworkIngestError(
                 409,
                 code,

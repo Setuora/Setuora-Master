@@ -11,7 +11,7 @@ The API is usable for a controlled single-process pilot. TLS edge deployment,
 credential operations, PostgreSQL migration, distributed rate limiting, and
 failure/soak testing remain production gates. See
 [ADR-001](../architecture/adr-001-master-lite-control-plane.md) and the
-[Internet edge runbook](../deployment/master-internet-edge.md).
+[remote-connectivity runbook](../deployment/remote-franchise-connectivity.md).
 
 ## Contract Summary
 
@@ -35,8 +35,9 @@ transaction. It does **not** prove that Tally accepted a voucher.
 
 Production and remote pilot traffic must use HTTPS with normal hostname and
 certificate verification. Lite refuses to start enabled synchronization unless
-`MASTER_URL` begins with `https://`. The public edge must terminate a publicly
-trusted certificate; `tls internal` is only for the inherited LAN setup.
+`MASTER_URL` begins with `https://`. The supported deployment uses Tailscale
+Serve to terminate a certificate for Master's private `*.ts.net` name. Tailscale
+Funnel is not enabled.
 
 Every request uses:
 
@@ -52,8 +53,8 @@ Content-Type: application/json
 ```
 
 The application currently validates the JSON bytes rather than rejecting on
-media type alone. The public edge example enforces `application/json` for event
-uploads and command ACKs.
+media type alone. Lite must still send `application/json` for event uploads and
+command acknowledgements.
 
 Master generates `key_id` and `secret` with cryptographically secure random
 Base64URL values. It returns the complete key once and stores only the SHA-256
@@ -74,14 +75,14 @@ production gates.
 
 Authentication failures use these codes:
 
-| HTTP | Code | Meaning |
-|---:|---|---|
-| 401 | `AUTH_REQUIRED` | Missing or non-Bearer Authorization header |
-| 401 | `INVALID_CREDENTIAL` | Malformed key, unknown key ID, or wrong secret |
-| 401 | `CREDENTIAL_REVOKED` | Credential was revoked |
-| 401 | `CREDENTIAL_EXPIRED` | Optional expiry has passed |
-| 403 | `NODE_INACTIVE` | Credential is valid but its franchise is inactive |
-| 429 | `RATE_LIMITED` | Credential exceeded the configured application limit |
+| HTTP | Code                 | Meaning                                              |
+| ---: | -------------------- | ---------------------------------------------------- |
+|  401 | `AUTH_REQUIRED`      | Missing or non-Bearer Authorization header           |
+|  401 | `INVALID_CREDENTIAL` | Malformed key, unknown key ID, or wrong secret       |
+|  401 | `CREDENTIAL_REVOKED` | Credential was revoked                               |
+|  401 | `CREDENTIAL_EXPIRED` | Optional expiry has passed                           |
+|  403 | `NODE_INACTIVE`      | Credential is valid but its franchise is inactive    |
+|  429 | `RATE_LIMITED`       | Credential exceeded the configured application limit |
 
 `401` responses include `WWW-Authenticate: Bearer`.
 
@@ -183,12 +184,12 @@ array, which is valid only for `HEARTBEAT`.
 
 Defaults are configurable on Master and must remain aligned with the edge:
 
-| Bound | Default |
-|---|---:|
-| Encoded request body | 5,242,880 bytes (5 MiB) |
-| Events per request | 1 to 100 |
-| Items in one event | 0 to 5,000 |
-| Total items across the request | 5,000 |
+| Bound                          |                 Default |
+| ------------------------------ | ----------------------: |
+| Encoded request body           | 5,242,880 bytes (5 MiB) |
+| Events per request             |                1 to 100 |
+| Items in one event             |              0 to 5,000 |
+| Total items across the request |                   5,000 |
 
 `Content-Length` is required for this endpoint. A missing header returns
 `411 CONTENT_LENGTH_REQUIRED`, a non-integer returns
@@ -206,28 +207,28 @@ authentication or idempotency inputs.
 
 ### Event fields
 
-| Field | Required | Constraint |
-|---|---|---|
-| `event_id` | yes | UUID; immutable idempotency identity |
-| `sequence` | yes | integer `>= 1`; next contiguous franchise sequence |
-| `schema_version` | no | defaults to and must equal `1` |
-| `type` | yes | one of the event types below |
-| `occurred_at` | yes | ISO 8601 datetime with an explicit UTC offset |
-| `reference` | no | string, at most 180 characters |
-| `actor` | no | string, at most 120 characters |
-| `items` | conditionally | array; shape below |
-| `party_name` | no | string, at most 180 characters |
-| `party_state` | no | string, at most 80 characters |
-| `party_gst_registration_type` | no | string, at most 40 characters |
-| `party_gst_name` | no | string, at most 180 characters |
-| `party_gstin` | no | string, at most 20 characters |
-| `gst_treatment` | no | string, at most 40 characters |
-| `gst_cgst_rate` | no | number from 0 through 100 |
-| `gst_sgst_rate` | no | number from 0 through 100 |
-| `gst_igst_rate` | no | number from 0 through 100 |
-| `reason_code` | no | string, at most 80 characters |
-| `destination_franchise_code` | dispatch only | string, at most 40 characters; normalized uppercase |
-| `transfer_id` | receipt only | UUID |
+| Field                         | Required      | Constraint                                          |
+| ----------------------------- | ------------- | --------------------------------------------------- |
+| `event_id`                    | yes           | UUID; immutable idempotency identity                |
+| `sequence`                    | yes           | integer `>= 1`; next contiguous franchise sequence  |
+| `schema_version`              | no            | defaults to and must equal `1`                      |
+| `type`                        | yes           | one of the event types below                        |
+| `occurred_at`                 | yes           | ISO 8601 datetime with an explicit UTC offset       |
+| `reference`                   | no            | string, at most 180 characters                      |
+| `actor`                       | no            | string, at most 120 characters                      |
+| `items`                       | conditionally | array; shape below                                  |
+| `party_name`                  | no            | string, at most 180 characters                      |
+| `party_state`                 | no            | string, at most 80 characters                       |
+| `party_gst_registration_type` | no            | string, at most 40 characters                       |
+| `party_gst_name`              | no            | string, at most 180 characters                      |
+| `party_gstin`                 | no            | string, at most 20 characters                       |
+| `gst_treatment`               | no            | string, at most 40 characters                       |
+| `gst_cgst_rate`               | no            | number from 0 through 100                           |
+| `gst_sgst_rate`               | no            | number from 0 through 100                           |
+| `gst_igst_rate`               | no            | number from 0 through 100                           |
+| `reason_code`                 | no            | string, at most 80 characters                       |
+| `destination_franchise_code`  | dispatch only | string, at most 40 characters; normalized uppercase |
+| `transfer_id`                 | receipt only  | UUID                                                |
 
 Strings are trimmed. Unknown fields are rejected.
 
@@ -236,40 +237,40 @@ Strings are trimmed. Unknown fields are rejected.
 Every non-heartbeat event requires at least one item. A serial may appear only
 once within an event.
 
-| Field | Required | Constraint |
-|---|---|---|
-| `serial_number` | yes | non-empty string, at most 140 characters |
-| `product_code` | yes | non-empty string, at most 80 characters; normalized uppercase |
-| `product_name` | yes | non-empty string, at most 180 characters |
-| `tally_stock_item_name` | yes | non-empty string, at most 180 characters |
-| `hsn` | yes | string, at most 40 characters |
-| `gst_rate` | yes | number from 0 through 100 |
-| `unit` | yes | non-empty string, at most 40 characters |
-| `rate` | yes | number `>= 0` |
-| `status` | yes | non-empty string, at most 40 characters; normalized uppercase |
-| `product_batch_number` | no | string, at most 80 characters |
-| `mfg_date` | no | ISO date |
-| `expiry_date` | no | ISO date; cannot precede `mfg_date` |
-| `warehouse` | no | string, at most 80 characters |
+| Field                   | Required | Constraint                                                    |
+| ----------------------- | -------- | ------------------------------------------------------------- |
+| `serial_number`         | yes      | non-empty string, at most 140 characters                      |
+| `product_code`          | yes      | non-empty string, at most 80 characters; normalized uppercase |
+| `product_name`          | yes      | non-empty string, at most 180 characters                      |
+| `tally_stock_item_name` | yes      | non-empty string, at most 180 characters                      |
+| `hsn`                   | yes      | string, at most 40 characters                                 |
+| `gst_rate`              | yes      | number from 0 through 100                                     |
+| `unit`                  | yes      | non-empty string, at most 40 characters                       |
+| `rate`                  | yes      | number `>= 0`                                                 |
+| `status`                | yes      | non-empty string, at most 40 characters; normalized uppercase |
+| `product_batch_number`  | no       | string, at most 80 characters                                 |
+| `mfg_date`              | no       | ISO date                                                      |
+| `expiry_date`           | no       | ISO date; cannot precede `mfg_date`                           |
+| `warehouse`             | no       | string, at most 80 characters                                 |
 
 Money, rates, quantities, and GST values are JSON numbers in this MVP schema.
 Each serialized item represents one QR/serial and quantity one.
 
 ### Event types and committed effects
 
-| Type | Current Master effect |
-|---|---|
-| `STOCK_SNAPSHOT` | Enrolls new `GENERATED`/`IN_STOCK` serials or updates metadata for an owned serial at the same authoritative status; `QR_REPLACEMENT` is the only snapshot status transition |
-| `PURCHASE` | Moves `GENERATED`/`PURCHASE_RETURN` to `IN_STOCK`; creates a mirrored `PENDING_SYNC` batch |
-| `RECEIVE` | Same stock transition and Tally eligibility as `PURCHASE` |
-| `SALE` | Moves available stock to `SOLD`; creates a mirrored `PENDING_SYNC` batch |
-| `SALES_RETURN` | Moves `SOLD` to `IN_STOCK`, or `DAMAGED` for reason `DAMAGED`/`EXPIRED`; creates a mirrored `PENDING_SYNC` batch |
-| `PURCHASE_RETURN` | Moves available stock to `PURCHASE_RETURN`; mirrored batch is currently `CLOSED` |
-| `ISSUE` | Moves `IN_STOCK` to `ISSUED`; mirrored batch is currently `CLOSED` |
-| `AUDIT` | Records an audit transaction without changing the authoritative state; mirrored batch is `CLOSED` |
-| `TRANSFER_DISPATCHED` | Validates source ownership and destination, moves items to `IN_TRANSIT`, creates the transfer, and queues `TRANSFER_AVAILABLE` |
-| `TRANSFER_RECEIVED` | Accepts a destination subset, transfers ownership, sets `PARTIALLY_RECEIVED` or `RECEIVED`, and queues `TRANSFER_RECEIPT` |
-| `HEARTBEAT` | Advances sequence and last-seen time; `items` must be empty |
+| Type                  | Current Master effect                                                                                                                                                        |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STOCK_SNAPSHOT`      | Enrolls new `GENERATED`/`IN_STOCK` serials or updates metadata for an owned serial at the same authoritative status; `QR_REPLACEMENT` is the only snapshot status transition |
+| `PURCHASE`            | Moves `GENERATED`/`PURCHASE_RETURN` to `IN_STOCK`; creates a mirrored `PENDING_SYNC` batch                                                                                   |
+| `RECEIVE`             | Same stock transition and Tally eligibility as `PURCHASE`                                                                                                                    |
+| `SALE`                | Moves available stock to `SOLD`; creates a mirrored `PENDING_SYNC` batch                                                                                                     |
+| `SALES_RETURN`        | Moves `SOLD` to `IN_STOCK`, or `DAMAGED` for reason `DAMAGED`/`EXPIRED`; creates a mirrored `PENDING_SYNC` batch                                                             |
+| `PURCHASE_RETURN`     | Moves available stock to `PURCHASE_RETURN`; mirrored batch is currently `CLOSED`                                                                                             |
+| `ISSUE`               | Moves `IN_STOCK` to `ISSUED`; mirrored batch is currently `CLOSED`                                                                                                           |
+| `AUDIT`               | Records an audit transaction without changing the authoritative state; mirrored batch is `CLOSED`                                                                            |
+| `TRANSFER_DISPATCHED` | Validates source ownership and destination, moves items to `IN_TRANSIT`, creates the transfer, and queues `TRANSFER_AVAILABLE`                                               |
+| `TRANSFER_RECEIVED`   | Accepts a destination subset, transfers ownership, sets `PARTIALLY_RECEIVED` or `RECEIVED`, and queues `TRANSFER_RECEIPT`                                                    |
+| `HEARTBEAT`           | Advances sequence and last-seen time; `items` must be empty                                                                                                                  |
 
 `STOCK_SNAPSHOT` is additive for the listed serials. New serials may be enrolled
 only as `GENERATED` or `IN_STOCK`. Existing serials must remain at Master's
@@ -315,14 +316,14 @@ status.
 
 Conflicts return:
 
-| HTTP | Code | Condition |
-|---:|---|---|
-| 403 | `EVENT_FORBIDDEN` | Event ID belongs to another franchise |
-| 409 | `EVENT_ID_CONFLICT` | Same event ID, different canonical body |
-| 409 | `SEQUENCE_CONFLICT` | Sequence already belongs to another event |
-| 409 | `SEQUENCE_GAP` | New sequence is greater than expected |
-| 409 | `SEQUENCE_STALE` | New sequence is lower than expected |
-| 409 | `CONCURRENT_EVENT_CONFLICT` | Concurrent writer changed the stream |
+| HTTP | Code                        | Condition                                 |
+| ---: | --------------------------- | ----------------------------------------- |
+|  403 | `EVENT_FORBIDDEN`           | Event ID belongs to another franchise     |
+|  409 | `EVENT_ID_CONFLICT`         | Same event ID, different canonical body   |
+|  409 | `SEQUENCE_CONFLICT`         | Sequence already belongs to another event |
+|  409 | `SEQUENCE_GAP`              | New sequence is greater than expected     |
+|  409 | `SEQUENCE_STALE`            | New sequence is lower than expected       |
+|  409 | `CONCURRENT_EVENT_CONFLICT` | Concurrent writer changed the stream      |
 
 Gap/stale errors include `details.expected_sequence`. A batch may contain an
 identical duplicate prefix followed by new contiguous events. Any validation,
@@ -498,12 +499,12 @@ Success returns the command with `acknowledged_at` populated:
 Acknowledging the same command again is idempotent and preserves the first
 acknowledgement time.
 
-| HTTP | Code | Condition |
-|---:|---|---|
-| 403 | `COMMAND_FORBIDDEN` | Command belongs to a different franchise |
-| 404 | `COMMAND_NOT_FOUND` | UUID is valid but command does not exist |
-| 422 | `INVALID_IDENTIFIER` | Path value is not a UUID |
-| 422 | `VALIDATION_ERROR` | Acknowledgement body is invalid |
+| HTTP | Code                 | Condition                                |
+| ---: | -------------------- | ---------------------------------------- |
+|  403 | `COMMAND_FORBIDDEN`  | Command belongs to a different franchise |
+|  404 | `COMMAND_NOT_FOUND`  | UUID is valid but command does not exist |
+|  422 | `INVALID_IDENTIFIER` | Path value is not a UUID                 |
+|  422 | `VALIDATION_ERROR`   | Acknowledgement body is invalid          |
 
 ## Validation and Domain Errors
 
@@ -579,7 +580,7 @@ Before upgrading either side, test:
 The implemented API is not, by itself, approval to expose Master to the
 Internet. Production still requires:
 
-- the reviewed edge/WireGuard boundary and public certificate;
+- reviewed Tailscale tags/grants, HTTPS, device lifecycle, and denial tests;
 - PostgreSQL and formal migrations;
 - tested credential provisioning, successor overlap, expiry, audit, and
   emergency revocation procedures;

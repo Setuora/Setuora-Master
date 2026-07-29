@@ -50,11 +50,7 @@
       current[0] = i;
       for (let j = 1; j <= b.length; j += 1) {
         const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-        current[j] = Math.min(
-          current[j - 1] + 1,
-          previous[j] + 1,
-          previous[j - 1] + cost,
-        );
+        current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
       }
       previous.splice(0, previous.length, ...current);
     }
@@ -107,13 +103,9 @@
     const queryTokens = tokenize(normalizedQuery);
     if (!queryTokens.length) return 0;
     const tokenScores = queryTokens.map((queryToken) =>
-      record.tokens.reduce(
-        (best, token) => Math.max(best, tokenSimilarity(queryToken, token)),
-        0,
-      ),
+      record.tokens.reduce((best, token) => Math.max(best, tokenSimilarity(queryToken, token)), 0),
     );
-    const average =
-      tokenScores.reduce((total, score) => total + score, 0) / tokenScores.length;
+    const average = tokenScores.reduce((total, score) => total + score, 0) / tokenScores.length;
     const weakest = Math.min(...tokenScores);
     const phraseScore = Math.max(
       editSimilarity(compactQuery, record.compactText.slice(0, compactQuery.length)),
@@ -124,12 +116,14 @@
   }
 
   function optionSearchText(option) {
-    return normalizeSearch([
-      optionText(option),
-      option.value || "",
-      option.dataset.search || "",
-      option.parentElement?.label || "",
-    ].join(" "));
+    return normalizeSearch(
+      [
+        optionText(option),
+        option.value || "",
+        option.dataset.search || "",
+        option.parentElement?.label || "",
+      ].join(" "),
+    );
   }
 
   function isOptionVisible(option) {
@@ -141,9 +135,9 @@
     const group = option.parentElement;
     return Boolean(
       option.disabled ||
-        (group?.tagName === "OPTGROUP" && group.disabled) ||
-        option.hidden ||
-        group?.hidden,
+      (group?.tagName === "OPTGROUP" && group.disabled) ||
+      option.hidden ||
+      group?.hidden,
     );
   }
 
@@ -205,9 +199,7 @@
         })
         .forEach((record) => control.options.insertBefore(record.item, control.empty));
     } else if (!normalizedQuery && !control.hasGroups) {
-      control.records.forEach((record) =>
-        control.options.insertBefore(record.item, control.empty),
-      );
+      control.records.forEach((record) => control.options.insertBefore(record.item, control.empty));
     }
 
     control.empty.hidden = visibleCount > 0;
@@ -252,9 +244,7 @@
 
     Array.from(select.options).forEach((option, index) => {
       const group =
-        option.parentElement?.tagName === "OPTGROUP"
-          ? option.parentElement.label || ""
-          : "";
+        option.parentElement?.tagName === "OPTGROUP" ? option.parentElement.label || "" : "";
       if (group && group !== lastGroup) {
         control.hasGroups = true;
         const groupLabel = document.createElement("span");
@@ -288,9 +278,11 @@
           focusVisibleItem(control, -1);
         } else if (event.key === "Home") {
           event.preventDefault();
-          control.items.find((candidate) => !candidate.hidden)?.focus({
-            preventScroll: true,
-          });
+          control.items
+            .find((candidate) => !candidate.hidden)
+            ?.focus({
+              preventScroll: true,
+            });
         } else if (event.key === "End") {
           event.preventDefault();
           [...control.items]
@@ -492,14 +484,7 @@
     control.observer = new MutationObserver(() => renderOptions(control));
     control.observer.observe(select, {
       attributes: true,
-      attributeFilter: [
-        "disabled",
-        "hidden",
-        "label",
-        "required",
-        "selected",
-        "value",
-      ],
+      attributeFilter: ["disabled", "hidden", "label", "required", "selected", "value"],
       childList: true,
       subtree: true,
     });

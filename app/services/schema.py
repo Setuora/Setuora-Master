@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import Engine, inspect, text
@@ -29,7 +29,9 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
         if "party_state" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN party_state VARCHAR(80)"))
         if "party_gst_registration_type" not in columns:
-            connection.execute(text("ALTER TABLE batches ADD COLUMN party_gst_registration_type VARCHAR(40)"))
+            connection.execute(
+                text("ALTER TABLE batches ADD COLUMN party_gst_registration_type VARCHAR(40)")
+            )
         if "party_gst_name" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN party_gst_name VARCHAR(180)"))
         if "party_gstin" not in columns:
@@ -45,14 +47,18 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
         if "sync_remote_id" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN sync_remote_id VARCHAR(80)"))
             connection.execute(
-                text("CREATE UNIQUE INDEX IF NOT EXISTS ix_batches_sync_remote_id ON batches (sync_remote_id)")
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_batches_sync_remote_id ON batches (sync_remote_id)"
+                )
             )
         if "sync_request_xml" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN sync_request_xml TEXT"))
         if "sync_started_at" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN sync_started_at DATETIME"))
             connection.execute(
-                text("CREATE INDEX IF NOT EXISTS ix_batches_sync_started_at ON batches (sync_started_at)")
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_batches_sync_started_at ON batches (sync_started_at)"
+                )
             )
         if "audit_assignment_id" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN audit_assignment_id INTEGER"))
@@ -68,9 +74,13 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
             if "label_printed_at" not in serial_columns:
                 connection.execute(text("ALTER TABLE serials ADD COLUMN label_printed_at DATETIME"))
             if "label_printed_by_id" not in serial_columns:
-                connection.execute(text("ALTER TABLE serials ADD COLUMN label_printed_by_id INTEGER"))
+                connection.execute(
+                    text("ALTER TABLE serials ADD COLUMN label_printed_by_id INTEGER")
+                )
             if "product_batch_number" not in serial_columns:
-                connection.execute(text("ALTER TABLE serials ADD COLUMN product_batch_number VARCHAR(80)"))
+                connection.execute(
+                    text("ALTER TABLE serials ADD COLUMN product_batch_number VARCHAR(80)")
+                )
             if "mfg_date" not in serial_columns:
                 connection.execute(text("ALTER TABLE serials ADD COLUMN mfg_date DATE"))
             if "expiry_date" not in serial_columns:
@@ -85,44 +95,76 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
                     )
                 )
                 connection.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_serials_warehouse_level ON serials (warehouse_level)")
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_serials_warehouse_level ON serials (warehouse_level)"
+                    )
                 )
             if "location_id" not in serial_columns:
                 connection.execute(text("ALTER TABLE serials ADD COLUMN location_id INTEGER"))
-                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_serials_location_id ON serials (location_id)"))
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_serials_location_id ON serials (location_id)"
+                    )
+                )
 
         if "batch_items" in inspector.get_table_names():
             item_columns = {column["name"] for column in inspector.get_columns("batch_items")}
             if "fefo_picked" not in item_columns:
-                connection.execute(text("ALTER TABLE batch_items ADD COLUMN fefo_picked BOOLEAN DEFAULT 0"))
-            if "shelf_location_id" not in item_columns:
-                connection.execute(text("ALTER TABLE batch_items ADD COLUMN shelf_location_id INTEGER"))
                 connection.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_batch_items_shelf_location_id ON batch_items (shelf_location_id)")
+                    text("ALTER TABLE batch_items ADD COLUMN fefo_picked BOOLEAN DEFAULT 0")
+                )
+            if "shelf_location_id" not in item_columns:
+                connection.execute(
+                    text("ALTER TABLE batch_items ADD COLUMN shelf_location_id INTEGER")
+                )
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_batch_items_shelf_location_id ON batch_items (shelf_location_id)"
+                    )
                 )
             if "shelf_verified_by_id" not in item_columns:
-                connection.execute(text("ALTER TABLE batch_items ADD COLUMN shelf_verified_by_id INTEGER"))
+                connection.execute(
+                    text("ALTER TABLE batch_items ADD COLUMN shelf_verified_by_id INTEGER")
+                )
             if "shelf_verified_at" not in item_columns:
-                connection.execute(text("ALTER TABLE batch_items ADD COLUMN shelf_verified_at DATETIME"))
+                connection.execute(
+                    text("ALTER TABLE batch_items ADD COLUMN shelf_verified_at DATETIME")
+                )
 
         if "products" in inspector.get_table_names():
             product_columns = {column["name"] for column in inspector.get_columns("products")}
             if "nickname" not in product_columns:
                 connection.execute(text("ALTER TABLE products ADD COLUMN nickname VARCHAR(120)"))
-                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_products_nickname ON products (nickname)"))
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_products_nickname ON products (nickname)")
+                )
             if "sales_discount_rate" not in product_columns:
-                connection.execute(text("ALTER TABLE products ADD COLUMN sales_discount_rate FLOAT DEFAULT 0"))
+                connection.execute(
+                    text("ALTER TABLE products ADD COLUMN sales_discount_rate FLOAT DEFAULT 0")
+                )
             if "brand" not in product_columns:
                 connection.execute(text("ALTER TABLE products ADD COLUMN brand VARCHAR(120)"))
-                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_products_brand ON products (brand)"))
+                connection.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_products_brand ON products (brand)")
+                )
             if "alternate_tally_stock_item_name" not in product_columns:
-                connection.execute(text("ALTER TABLE products ADD COLUMN alternate_tally_stock_item_name VARCHAR(180)"))
+                connection.execute(
+                    text(
+                        "ALTER TABLE products ADD COLUMN alternate_tally_stock_item_name VARCHAR(180)"
+                    )
+                )
             if "shelf_verification_interval" not in product_columns:
                 connection.execute(
-                    text("ALTER TABLE products ADD COLUMN shelf_verification_interval INTEGER DEFAULT 1")
+                    text(
+                        "ALTER TABLE products ADD COLUMN shelf_verification_interval INTEGER DEFAULT 1"
+                    )
                 )
             if "purchase_qr_print_allowed" not in product_columns:
-                connection.execute(text("ALTER TABLE products ADD COLUMN purchase_qr_print_allowed BOOLEAN DEFAULT 0"))
+                connection.execute(
+                    text(
+                        "ALTER TABLE products ADD COLUMN purchase_qr_print_allowed BOOLEAN DEFAULT 0"
+                    )
+                )
             connection.execute(
                 text(
                     "UPDATE products SET shelf_verification_interval = 1 "
@@ -135,12 +177,13 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
             if "deleted_at" not in user_columns:
                 connection.execute(text("ALTER TABLE users ADD COLUMN deleted_at DATETIME"))
             if "must_change_password" not in user_columns:
-                connection.execute(text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0"))
+                connection.execute(
+                    text("ALTER TABLE users ADD COLUMN must_change_password BOOLEAN DEFAULT 0")
+                )
 
         if "tally_sales_voucher_cache" in inspector.get_table_names():
             voucher_cache_columns = {
-                column["name"]
-                for column in inspector.get_columns("tally_sales_voucher_cache")
+                column["name"] for column in inspector.get_columns("tally_sales_voucher_cache")
             }
             if "tally_user" not in voucher_cache_columns:
                 connection.execute(
@@ -157,7 +200,9 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
                 )
 
         if "storage_locations" in inspector.get_table_names():
-            location_columns = {column["name"] for column in inspector.get_columns("storage_locations")}
+            location_columns = {
+                column["name"] for column in inspector.get_columns("storage_locations")
+            }
             if "warehouse_level" not in location_columns:
                 connection.execute(
                     text(
@@ -265,7 +310,7 @@ def _backup_before_schema_rebuild(target: Engine) -> Path | None:
         return None
     backup_dir = source_path.parent / "schema-backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     destination = backup_dir / f"{source_path.stem}-before-inventory-fk-{stamp}.db"
     source = sqlite3.connect(source_path)
     try:

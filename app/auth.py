@@ -27,7 +27,7 @@ def current_user(request: Request, db: Session) -> User | None:
     return user
 
 
-PASSWORD_CHANGE_PATH = "/account/password"
+PASSWORD_CHANGE_PATH = "/account/password"  # noqa: S105 - route path, not a credential
 _PASSWORD_GATE_EXEMPT = {PASSWORD_CHANGE_PATH, "/logout"}
 
 
@@ -45,7 +45,9 @@ def require_user(request: Request, db: Session, roles: set[Role] | None = None) 
     return user
 
 
-def require_permission(request: Request, db: Session, access_key: str, allowed_values: set[str] | None = None) -> User:
+def require_permission(
+    request: Request, db: Session, access_key: str, allowed_values: set[str] | None = None
+) -> User:
     user = require_user(request, db)
     if not configured_role_has_access(user._access_config, user.role, access_key, allowed_values):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")

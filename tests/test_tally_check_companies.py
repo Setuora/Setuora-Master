@@ -72,7 +72,8 @@ def test_tally_check_lists_company_names_and_updates_from_modal_endpoint():
         visible_config = {
             key: value
             for key, value in COMPANY_CONFIG.items()
-            if key not in {
+            if key
+            not in {
                 "sales_voucher_type",
                 "purchase_voucher_type",
                 "sales_ledger_name",
@@ -157,10 +158,10 @@ def test_tally_check_lists_company_names_and_updates_from_modal_endpoint():
 
     assert page.status_code == 200
     assert 'data-company-open="company-modal-' in page.text
-    assert 'data-tally-search-form' in page.text
+    assert "data-tally-search-form" in page.text
     assert 'placeholder="Search companies or ledgers"' in page.text
-    assert 'data-tally-company-search=' in page.text
-    assert 'data-tally-master-search-row' in page.text
+    assert "data-tally-company-search=" in page.text
+    assert "data-tally-master-search-row" in page.text
     assert "Original Label" in page.text
     assert "Required Tally masters" not in page.text
     assert 'name="default_party_name"' not in page.text
@@ -168,9 +169,9 @@ def test_tally_check_lists_company_names_and_updates_from_modal_endpoint():
     assert "Unmark" not in page.text
     assert "tally-check-toggle" in page.text
     assert "Live Tally data" in page.text
-    assert 'data-tally-live-company' in page.text
-    assert 'data-tally-live-ledgers' in page.text
-    assert 'data-tally-live-sales' in page.text
+    assert "data-tally-live-company" in page.text
+    assert "data-tally-live-ledgers" in page.text
+    assert "data-tally-live-sales" in page.text
     assert 'data-auto-refresh="true"' in page.text
     assert '"/cached?"' in page.text
     assert update.status_code == 200
@@ -188,7 +189,10 @@ def test_tally_check_lists_company_names_and_updates_from_modal_endpoint():
     assert cached_data.json()["ledgers"][0]["name"] == "Customer A"
     assert gateway_check.status_code == 200
     assert 'class="alert success"' in gateway_check.text
-    assert "The configured Tally HTTP server is reachable and responding correctly." in gateway_check.text
+    assert (
+        "The configured Tally HTTP server is reachable and responding correctly."
+        in gateway_check.text
+    )
     assert "&lt;ENVELOPE&gt;" not in gateway_check.text
 
 

@@ -9,6 +9,7 @@ from app.templates import templates
 
 router = APIRouter()
 
+
 @router.get("/account/password")
 def change_password_page(request: Request, db: Session = Depends(get_db)):
     user = current_user(request, db)
@@ -37,7 +38,12 @@ def change_password(
         return templates.TemplateResponse(
             request,
             "account_password.html",
-            {"request": request, "user": user, "error": message, "forced": user.must_change_password},
+            {
+                "request": request,
+                "user": user,
+                "error": message,
+                "forced": user.must_change_password,
+            },
             status_code=400,
         )
 

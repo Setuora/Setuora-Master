@@ -38,7 +38,9 @@ def test_bootstrap_rejects_default_first_admin_password(db_session, monkeypatch)
 
 
 def _client_with_user(must_change=True):
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     with Session() as db:
@@ -62,11 +64,15 @@ def _client_with_user(must_change=True):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"}), Session, engine
+    return (
+        TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"}),
+        Session,
+        engine,
+    )
 
 
 def test_must_change_password_gate_redirects_protected_route():
-    client, Session, engine = _client_with_user(must_change=True)
+    client, _Session, engine = _client_with_user(must_change=True)
     try:
         authenticate_client(client, 1)
         response = client.get("/")
@@ -101,12 +107,16 @@ def test_change_password_clears_flag_and_updates_hash():
 
 
 def test_change_password_rejects_short_password():
-    client, Session, engine = _client_with_user(must_change=True)
+    client, _Session, engine = _client_with_user(must_change=True)
     try:
         authenticate_client(client, 1)
         response = client.post(
             "/account/password",
-            data={"current_password": "admin123", "new_password": "short", "confirm_password": "short"},
+            data={
+                "current_password": "admin123",
+                "new_password": "short",
+                "confirm_password": "short",
+            },
         )
     finally:
         app.dependency_overrides.clear()

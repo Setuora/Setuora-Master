@@ -60,11 +60,8 @@
   --shadow: var(--e3);
   --inset-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.92);
   --control-shadow:
-    var(--inset-highlight), inset 0 -1px 0 rgba(20, 20, 19, 0.1),
-    0 2px 4px rgba(20, 20, 19, 0.15);
-  --pressed-shadow:
-    inset 0 2px 4px rgba(20, 20, 19, 0.2),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.54);
+    var(--inset-highlight), inset 0 -1px 0 rgba(20, 20, 19, 0.1), 0 2px 4px rgba(20, 20, 19, 0.15);
+  --pressed-shadow: inset 0 2px 4px rgba(20, 20, 19, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.54);
 
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --dur: 0.18s;
@@ -72,14 +69,12 @@
   --go: #5db872;
   --go-dark: #3d9a55;
 
-  --font:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --display-font:
-    "Tiempos Headline", "Copernicus", "Cormorant Garamond", "EB Garamond",
-    Garamond, "Times New Roman", serif;
+    "Tiempos Headline", "Copernicus", "Cormorant Garamond", "EB Garamond", Garamond,
+    "Times New Roman", serif;
   --mono-font:
-    "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas,
-    monospace;
+    "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
 }
 
 * {
@@ -709,10 +704,7 @@ tfoot td {
   top: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(0, max-content) minmax(
-      140px,
-      1fr
-    );
+  grid-template-columns: minmax(140px, 1fr) minmax(0, max-content) minmax(140px, 1fr);
   align-items: center;
   gap: 16px;
   min-height: 64px;
@@ -2844,7 +2836,6 @@ small {
   .inline-form .searchable-select {
     width: 100%;
   }
-
 }
 
 @media (max-width: 520px) {
@@ -2880,7 +2871,6 @@ small {
     width: 100%;
     margin: 0;
   }
-
 }
 
 @media (prefers-reduced-motion: reduce) {

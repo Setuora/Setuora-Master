@@ -100,7 +100,11 @@ def _origin(value: str | None) -> tuple[str, str, int] | None:
         port = parsed.port
     except ValueError:
         return None
-    return parsed.scheme.lower(), parsed.hostname.lower(), port or (443 if parsed.scheme == "https" else 80)
+    return (
+        parsed.scheme.lower(),
+        parsed.hostname.lower(),
+        port or (443 if parsed.scheme == "https" else 80),
+    )
 
 
 class CSRFOriginMiddleware(BaseHTTPMiddleware):
@@ -112,9 +116,12 @@ class CSRFOriginMiddleware(BaseHTTPMiddleware):
         if request.method not in SAFE_METHODS and not is_node_api:
             source = request.headers.get("origin") or request.headers.get("referer")
             source_origin = _origin(source)
-            expected = request.headers.get("x-forwarded-host") or request.headers.get("host")
+            expected = request.headers.get("host")
             expected_authority = _authority(expected.split(",")[0] if expected else None)
-            expected_scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].lower()
+            # Uvicorn accepts proxy headers only from the explicitly configured
+            # loopback Tailscale sidecar, so request.url.scheme is already the
+            # trusted external scheme.
+            expected_scheme = request.url.scheme.lower()
             expected_port = 443 if expected_scheme == "https" else 80
             if expected_authority and expected_authority[1] is not None:
                 expected_port = expected_authority[1]
@@ -152,7 +159,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 )
             ),
         )
-        if request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
+        if request.url.scheme == "https":
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
             )

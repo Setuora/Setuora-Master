@@ -11,9 +11,7 @@ def update_transaction_references(
     if not batch.tally_reference:
         return
     rows = db.scalars(
-        select(InventoryTransaction).where(
-            InventoryTransaction.batch_id == batch.id
-        )
+        select(InventoryTransaction).where(InventoryTransaction.batch_id == batch.id)
     ).all()
     for row in rows:
         row.tally_reference = batch.tally_reference

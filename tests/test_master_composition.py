@@ -15,9 +15,7 @@ def application_paths(app) -> set[str]:
     for included in app.routes:
         router = getattr(included, "original_router", None)
         if router is not None:
-            paths.update(
-                route.path for route in router.routes if hasattr(route, "path")
-            )
+            paths.update(route.path for route in router.routes if hasattr(route, "path"))
     return paths
 
 

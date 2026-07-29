@@ -100,7 +100,9 @@ def calculate_voucher_summary(batch: Batch) -> VoucherSummary:
             sgst_amount = cgst_amount
             igst_amount = Decimal("0.00")
         else:
-            taxable_value = sale_taxable_value(line_amount, gst_rate) if is_sales_side else line_amount
+            taxable_value = (
+                sale_taxable_value(line_amount, gst_rate) if is_sales_side else line_amount
+            )
             cgst_rate = sgst_rate = money(gst_rate / Decimal("2"))
             igst_rate = Decimal("0.00")
             cgst_amount = money(taxable_value * cgst_rate / Decimal("100"))

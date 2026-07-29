@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import StringIO
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -60,8 +60,8 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _is_online(node: FranchiseNode, now: datetime | None = None) -> bool:
@@ -85,10 +85,7 @@ def _parse_datetime(value: str, field_name: str, *, end: bool = False) -> dateti
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid {field_name}",
         ) from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    else:
-        parsed = parsed.astimezone(timezone.utc)
+    parsed = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     if end and len(raw) == 10:
         parsed += timedelta(days=1)
     return parsed
@@ -196,9 +193,7 @@ def master_dashboard(request: Request, db: Session = Depends(get_db)):
         )
         or 0,
     }
-    recent_events = db.scalars(
-        _event_query().limit(12)
-    ).all()
+    recent_events = db.scalars(_event_query().limit(12)).all()
     recent_transfers = db.scalars(
         select(StockTransfer)
         .order_by(desc(StockTransfer.updated_at), desc(StockTransfer.id))
@@ -570,9 +565,7 @@ def _movement_rows(
         .group_by(NetworkStock.current_franchise_id, Product.id)
     )
     if selected_ids:
-        stock_statement = stock_statement.where(
-            NetworkStock.current_franchise_id.in_(selected_ids)
-        )
+        stock_statement = stock_statement.where(NetworkStock.current_franchise_id.in_(selected_ids))
     else:
         return []
     for node_id, product, quantity in db.execute(stock_statement):
@@ -626,13 +619,9 @@ def _movement_rows(
         .group_by(StockTransfer.source_franchise_id, Product.id)
     )
     if start_at:
-        transfer_out_statement = transfer_out_statement.where(
-            InboundEvent.occurred_at >= start_at
-        )
+        transfer_out_statement = transfer_out_statement.where(InboundEvent.occurred_at >= start_at)
     if end_at:
-        transfer_out_statement = transfer_out_statement.where(
-            InboundEvent.occurred_at < end_at
-        )
+        transfer_out_statement = transfer_out_statement.where(InboundEvent.occurred_at < end_at)
     for node_id, product, quantity in db.execute(transfer_out_statement):
         row_for(node_id, product)["transferred_out"] = int(quantity or 0)
 
@@ -656,9 +645,7 @@ def _movement_rows(
             StockTransferItem.received_at >= start_at
         )
     if end_at:
-        transfer_in_statement = transfer_in_statement.where(
-            StockTransferItem.received_at < end_at
-        )
+        transfer_in_statement = transfer_in_statement.where(StockTransferItem.received_at < end_at)
     for node_id, product, quantity in db.execute(transfer_in_statement):
         row_for(node_id, product)["transferred_in"] = int(quantity or 0)
     return sorted(
@@ -821,8 +808,7 @@ def network_tally_detail(
         .where(InboundEvent.tally_batch_id == batch_id)
         .options(
             selectinload(InboundEvent.franchise),
-            selectinload(InboundEvent.tally_batch)
-            .selectinload(Batch.sync_attempts),
+            selectinload(InboundEvent.tally_batch).selectinload(Batch.sync_attempts),
         )
     )
     if event is None or event.tally_batch is None:

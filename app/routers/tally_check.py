@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import date
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -74,7 +74,7 @@ def render_check_page(
         active = None
     if open_company_id not in {company.id for company in companies}:
         open_company_id = None
-    today = date.today()
+    today = datetime.now(UTC).date()
     financial_year_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
     return templates.TemplateResponse(
         request,
@@ -88,8 +88,7 @@ def render_check_page(
             "settings": get_all_settings(db),
             "result": result,
             "companies": [
-                {"company": company, "config": company_config(company)}
-                for company in companies
+                {"company": company, "config": company_config(company)} for company in companies
             ],
             "active": active,
             "can_edit_companies": role_has_access(db, user.role, "settings_edit"),
@@ -103,7 +102,9 @@ def render_check_page(
     )
 
 
-def _live_company_config(db: Session, company_id: int) -> tuple[Company | None, dict[str, str] | None]:
+def _live_company_config(
+    db: Session, company_id: int
+) -> tuple[Company | None, dict[str, str] | None]:
     company = db.get(Company, company_id)
     return company, company_config(company) if company else None
 
@@ -162,12 +163,24 @@ def save_company(
         "company_name": company_name,
         "tally_host": tally_host,
         "tally_port": tally_port,
-        "sales_voucher_type": current_config.get("sales_voucher_type", "") if sales_voucher_type is None else sales_voucher_type,
-        "purchase_voucher_type": current_config.get("purchase_voucher_type", "") if purchase_voucher_type is None else purchase_voucher_type,
-        "sales_ledger_name": current_config.get("sales_ledger_name", "") if sales_ledger_name is None else sales_ledger_name,
-        "purchase_ledger_name": current_config.get("purchase_ledger_name", "") if purchase_ledger_name is None else purchase_ledger_name,
-        "cgst_ledger_name": current_config.get("cgst_ledger_name", "") if cgst_ledger_name is None else cgst_ledger_name,
-        "sgst_ledger_name": current_config.get("sgst_ledger_name", "") if sgst_ledger_name is None else sgst_ledger_name,
+        "sales_voucher_type": current_config.get("sales_voucher_type", "")
+        if sales_voucher_type is None
+        else sales_voucher_type,
+        "purchase_voucher_type": current_config.get("purchase_voucher_type", "")
+        if purchase_voucher_type is None
+        else purchase_voucher_type,
+        "sales_ledger_name": current_config.get("sales_ledger_name", "")
+        if sales_ledger_name is None
+        else sales_ledger_name,
+        "purchase_ledger_name": current_config.get("purchase_ledger_name", "")
+        if purchase_ledger_name is None
+        else purchase_ledger_name,
+        "cgst_ledger_name": current_config.get("cgst_ledger_name", "")
+        if cgst_ledger_name is None
+        else cgst_ledger_name,
+        "sgst_ledger_name": current_config.get("sgst_ledger_name", "")
+        if sgst_ledger_name is None
+        else sgst_ledger_name,
         "sales_gst_ledger_mappings": sales_gst_ledger_mappings,
         "round_off_ledger_name": round_off_ledger_name,
     }

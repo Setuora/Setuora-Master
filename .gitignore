@@ -13,12 +13,10 @@ data/backups/
 data/schema-backups/
 data/secret_key
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
+node_modules/
 logs/
 CLAUDE.md
-deployment/caddy/caddy.exe
-deployment/caddy/Caddyfile
-deployment/caddy/setuora-caddy-root.crt
-deployment/caddy/state/
-deployment/windows/nssm.exe
+tailscale-state/

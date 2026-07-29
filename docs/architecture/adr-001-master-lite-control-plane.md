@@ -31,8 +31,8 @@ failure tests are not complete.
 ## Context
 
 The inherited application was designed for one LAN server and roughly ten users.
-It uses SQLite, server-rendered FastAPI pages, an in-process Tally retry loop, and
-a local Caddy certificate. That remains a useful implementation foundation:
+It uses SQLite, server-rendered FastAPI pages, and an in-process Tally retry
+loop. That remains a useful implementation foundation:
 
 - serial-level inventory and transaction history;
 - franchise operational capture and item-label handling;
@@ -65,15 +65,15 @@ neither application imports the other's router layer or database models.
 This avoids the operational cost of many services while creating a hard edition
 boundary:
 
-| Capability | Lite | Master |
-|---|---:|---:|
-| Franchise operational capture | Yes | No |
-| Item-label generation and printing | Yes | No |
-| Local inventory and offline operation | Yes | No |
-| Franchise event upload and command polling | Yes | API counterpart |
-| Cross-franchise monitoring and reports | Local view | Consolidated view |
-| Transfer coordination | Dispatch/receive actions | Authoritative coordinator |
-| Tally posting | No | Yes |
+| Capability                                 |                     Lite |                    Master |
+| ------------------------------------------ | -----------------------: | ------------------------: |
+| Franchise operational capture              |                      Yes |                        No |
+| Item-label generation and printing         |                      Yes |                        No |
+| Local inventory and offline operation      |                      Yes |                        No |
+| Franchise event upload and command polling |                      Yes |           API counterpart |
+| Cross-franchise monitoring and reports     |               Local view |         Consolidated view |
+| Transfer coordination                      | Dispatch/receive actions | Authoritative coordinator |
+| Tally posting                              |                       No |                       Yes |
 
 Master must not merely hide Lite pages in navigation. Its composition root must
 not register franchise operational mutation routes, and edition-boundary tests
@@ -189,25 +189,26 @@ separate gate: Stock Journal, source/destination Godown, voucher type, and
 accounting semantics must be proven against representative Tally data. No
 transfer Tally job is implemented; monitoring must not be mistaken for posting.
 
-### 7. Use the public-edge/private-Master deployment boundary
+### 7. Use a private Tailscale deployment boundary
 
-The preferred topology is:
+The selected cross-platform topology is:
 
 ```text
-Lite --outbound HTTPS--> public TLS edge VPS
-                         --WireGuard--> private Master ingress
-                                         -> Uvicorn on loopback
-                                         -> database on private/loopback
-                                         -> Tally on loopback/private LAN
+Lite --outbound Tailscale/WireGuard--> private tailnet HTTPS
+                                      -> Tailscale Serve sidecar
+                                      -> Uvicorn in shared container network
+                                      -> private database and Tally endpoint
 ```
 
-The administrative UI is reachable only through an operator VPN. The public
-edge serves only the Node Sync API. Tally port `9000`, the database port, Uvicorn,
-and Master maintenance pages are never exposed to the public Internet.
+Linux and Windows run the same Docker Compose stack. Tailnet grants permit Lite
+and operator sources to reach Master `tcp:443`, while each Node Sync request
+still requires a per-franchise application credential. Tailscale Funnel is not
+enabled. Tally port `9000`, the database port, Uvicorn, and backups are never
+exposed to the public Internet or advertised to the tailnet.
 
 See
 [`docs/architecture/master-lite-topology.md`](master-lite-topology.md) and
-[`docs/deployment/master-internet-edge.md`](../deployment/master-internet-edge.md).
+[`docs/deployment/remote-franchise-connectivity.md`](../deployment/remote-franchise-connectivity.md).
 
 ### 8. Treat SQLite as a bounded pilot exception
 
@@ -250,12 +251,11 @@ Deferred. A broker could help at higher throughput, but it adds deployment,
 backup, monitoring, and operator complexity that is not justified by the pilot
 assumption. The inbox/outbox tables preserve a migration path to a broker later.
 
-### Direct port forwarding to the Master Windows server
+### Direct public port forwarding
 
-Allowed only as a documented weaker fallback. It removes the separate edge blast
-radius and puts the premises host directly on the Internet. It requires explicit
-security review, public ACME TLS, firewall verification, administrative VPN
-isolation, and rollback approval.
+Rejected for the supported pilot. It puts the premises host on the anonymous
+Internet and reintroduces public DNS, certificate, proxy, firewall, and
+administrative-surface isolation work that the private tailnet avoids.
 
 ### SQLite for permanent production
 
@@ -299,9 +299,9 @@ demonstrated:
   bounds, and audit tests pass;
 - franchise isolation is enforced by database keys and authorization tests;
 - PostgreSQL and formal forward/rollback migration procedures are operational;
-- the public edge has trusted TLS, body/rate limits, hardened proxy headers, and
-  only the approved public port;
-- administrative access is VPN-isolated and protected by MFA;
+- Tailscale HTTPS, tags, grants, device lifecycle, and denial tests are
+  operational, with Funnel disabled;
+- administrative access is tailnet-isolated and protected by MFA;
 - secrets have least-privilege filesystem ACLs;
 - encrypted offsite backup and bare-machine restore drills pass;
 - metrics and alerts cover last franchise contact, backlog, processing failures,

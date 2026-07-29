@@ -10,7 +10,7 @@ from app.services.settings import (
     ensure_default_settings,
 )
 
-DEFAULT_ADMIN_PASSWORD = "admin123"
+DEFAULT_ADMIN_PASSWORD = "admin123"  # noqa: S105 - legacy value used only for detection
 
 
 def _validate_first_admin_settings() -> None:
@@ -34,7 +34,9 @@ def _flag_default_password_admins(db: Session) -> None:
     ]
     changed = False
     for admin in admins:
-        if not admin.must_change_password and verify_password(DEFAULT_ADMIN_PASSWORD, admin.password_hash):
+        if not admin.must_change_password and verify_password(
+            DEFAULT_ADMIN_PASSWORD, admin.password_hash
+        ):
             admin.must_change_password = True
             changed = True
     if changed:

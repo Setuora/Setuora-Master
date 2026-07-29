@@ -164,18 +164,11 @@ def access_section_definitions() -> list[AccessSectionDefinition]:
 
 
 def _definitions_by_key() -> dict[str, AccessRowDefinition]:
-    return {
-        row.key: row
-        for section in access_section_definitions()
-        for row in section.rows
-    }
+    return {row.key: row for section in access_section_definitions() for row in section.rows}
 
 
 def default_role_access_config() -> dict[str, dict[str, str]]:
-    return {
-        key: row.defaults.copy()
-        for key, row in _definitions_by_key().items()
-    }
+    return {key: row.defaults.copy() for key, row in _definitions_by_key().items()}
 
 
 def _valid_option(row: AccessRowDefinition, value: str) -> bool:
@@ -200,9 +193,7 @@ def normalize_role_access_config(
                 config[row_key][role.key] = value
 
     for row_key, row in definitions.items():
-        config[row_key][Role.SUPER_ADMIN.value] = row.defaults[
-            Role.SUPER_ADMIN.value
-        ]
+        config[row_key][Role.SUPER_ADMIN.value] = row.defaults[Role.SUPER_ADMIN.value]
         if row_key == "role_access_edit":
             config[row_key][Role.ADMIN.value] = "no"
             config[row_key][Role.DIRECTORS.value] = "no"
@@ -280,11 +271,7 @@ def _cell(
 def role_access_sections(
     db: Session | None = None,
 ) -> list[AccessSection]:
-    config = (
-        get_role_access_config(db)
-        if db is not None
-        else default_role_access_config()
-    )
+    config = get_role_access_config(db) if db is not None else default_role_access_config()
     sections: list[AccessSection] = []
     for section in access_section_definitions():
         rows = []
@@ -347,10 +334,7 @@ def configured_role_has_access(
 ) -> bool:
     values = _configured_access_values(config, role, access_key)
     if allowed_values is not None:
-        return any(
-            value not in DENY_VALUES and value in allowed_values
-            for value in values
-        )
+        return any(value not in DENY_VALUES and value in allowed_values for value in values)
     return any(value not in DENY_VALUES for value in values)
 
 

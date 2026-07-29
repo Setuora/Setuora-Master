@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -76,9 +76,7 @@ def add_serial_to_batch(
     _user: User,
     serial_number: str,
 ) -> BatchItem:
-    serial = db.scalar(
-        select(Serial).where(Serial.serial_number == serial_number)
-    )
+    serial = db.scalar(select(Serial).where(Serial.serial_number == serial_number))
     if serial is None:
         raise ValueError(f"Unknown serial: {serial_number}")
     item = BatchItem(
@@ -98,7 +96,7 @@ def apply_batch_statuses(
     _user: User,
 ) -> None:
     batch.status = BatchStatus.SUBMITTED.value
-    batch.submitted_at = datetime.now(timezone.utc)
+    batch.submitted_at = datetime.now(UTC)
     db.commit()
 
 
@@ -122,7 +120,7 @@ def verify_pending_items_on_shelf(
     location: StorageLocation,
     user: User,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for item in batch.items:
         item.shelf_location_id = location.id
         item.shelf_verified_by_id = user.id

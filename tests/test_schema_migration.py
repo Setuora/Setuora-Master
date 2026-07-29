@@ -106,8 +106,7 @@ def test_runtime_schema_adds_tally_user_to_cached_sales_vouchers(tmp_path):
     ensure_runtime_schema(engine)
 
     columns = {
-        column["name"]
-        for column in inspect(engine).get_columns("tally_sales_voucher_cache")
+        column["name"] for column in inspect(engine).get_columns("tally_sales_voucher_cache")
     }
     assert "tally_user" in columns
 
@@ -188,6 +187,16 @@ def test_inventory_table_rebuild_preserves_rows_and_adds_all_foreign_keys(tmp_pa
         assert connection.scalar(text("SELECT count(*) FROM batch_items")) == 1
         assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
 
-    assert {"product_id", "replaced_by_id", "label_printed_by_id", "location_id"} <= serial_foreign_keys
-    assert {"batch_id", "serial_id", "shelf_location_id", "shelf_verified_by_id"} <= item_foreign_keys
+    assert {
+        "product_id",
+        "replaced_by_id",
+        "label_printed_by_id",
+        "location_id",
+    } <= serial_foreign_keys
+    assert {
+        "batch_id",
+        "serial_id",
+        "shelf_location_id",
+        "shelf_verified_by_id",
+    } <= item_foreign_keys
     assert "serials" in transaction_targets

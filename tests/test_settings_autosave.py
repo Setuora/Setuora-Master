@@ -84,7 +84,9 @@ def test_autosave_persists_fields_and_mirrors_active_company(db_session):
 
 
 def test_autosave_route_records_settings_audit():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     with Session() as db:
@@ -126,7 +128,9 @@ def test_autosave_route_records_settings_audit():
 
 
 def test_settings_routes_preserve_removed_fields_when_omitted():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     with Session() as db:
@@ -175,7 +179,9 @@ def test_settings_routes_preserve_removed_fields_when_omitted():
 
 
 def test_create_company_without_legacy_tally_fields_inherits_current_values():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     with Session() as db:
@@ -263,16 +269,13 @@ def test_sales_gst_ledger_mappings_are_normalized_and_validated(db_session):
     assert mappings["18"]["cgst"] == "CGST @ 9%"
     assert mappings["18"]["igst"] == "IGST @ 18%"
 
-    legacy = parse_sales_gst_ledger_mappings(
-        "5 | Sales @ 5% | CGST @ 2.5% | SGST @ 2.5%"
-    )
+    legacy = parse_sales_gst_ledger_mappings("5 | Sales @ 5% | CGST @ 2.5% | SGST @ 2.5%")
     assert legacy["5"]["igst"] == ""
 
     _seed(db_session)
     duplicate = _valid_request(db_session)
     duplicate["sales_gst_ledger_mappings"] = (
-        "5 | Sales A | CGST A | SGST A | IGST A\n"
-        "5.0 | Sales B | CGST B | SGST B | IGST B"
+        "5 | Sales A | CGST A | SGST A | IGST A\n5.0 | Sales B | CGST B | SGST B | IGST B"
     )
     assert "more than once" in validate_settings(duplicate)
 
@@ -285,11 +288,7 @@ def test_activating_older_company_profile_clears_gst_ledger_mappings(db_session)
     _seed(db_session)
     update_settings(
         db_session,
-        {
-            "sales_gst_ledger_mappings": (
-                "5 | Sales @ 5% | Output CGST @ 2.5% | Output SGST @ 2.5%"
-            )
-        },
+        {"sales_gst_ledger_mappings": ("5 | Sales @ 5% | Output CGST @ 2.5% | Output SGST @ 2.5%")},
     )
     older_config = {
         key: value
@@ -334,7 +333,9 @@ def test_legacy_placeholder_settings_are_cleared_when_sync_is_disabled(db_sessio
     db_session.add(
         Company(
             name=LEGACY_PLACEHOLDER_SETTINGS["company_name"],
-            config=json.dumps({key: LEGACY_PLACEHOLDER_SETTINGS[key] for key in COMPANY_SETTING_KEYS}),
+            config=json.dumps(
+                {key: LEGACY_PLACEHOLDER_SETTINGS[key] for key in COMPANY_SETTING_KEYS}
+            ),
             is_active=True,
         )
     )

@@ -5,7 +5,7 @@ import shutil
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -118,10 +118,12 @@ def create_scheduled_backup() -> BackupFileInfo:
             raise RuntimeError("SQLite database file does not exist yet")
 
         settings = get_settings()
-        backup_dir = resolve_configured_path(getattr(settings, "backup_directory", "./data/backups"))
+        backup_dir = resolve_configured_path(
+            getattr(settings, "backup_directory", "./data/backups")
+        )
         backup_dir.mkdir(parents=True, exist_ok=True)
 
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
         filename = f"setuora-backup-{stamp}.db"
         destination = backup_dir / filename
         temp_destination = backup_dir / f".{filename}.tmp"
@@ -136,13 +138,16 @@ def create_scheduled_backup() -> BackupFileInfo:
         _prune_backups(backup_dir, getattr(settings, "backup_retention_count", 14))
         offsite_dir = getattr(settings, "backup_offsite_directory", "").strip()
         if offsite_dir:
-            _prune_backups(resolve_configured_path(offsite_dir), getattr(settings, "backup_retention_count", 14))
+            _prune_backups(
+                resolve_configured_path(offsite_dir),
+                getattr(settings, "backup_retention_count", 14),
+            )
 
         return BackupFileInfo(
             filename=filename,
             path=destination,
             size_bytes=destination.stat().st_size,
-            verified_at=datetime.now(timezone.utc),
+            verified_at=datetime.now(UTC),
             offsite_path=offsite_path,
         )
 
@@ -322,7 +327,7 @@ def _format_env_value(value: str) -> str:
     if "\n" in value or "\r" in value:
         raise ValueError("Backup settings cannot contain line breaks.")
     if '"' in value:
-        raise ValueError('Backup settings cannot contain double quotes.')
+        raise ValueError("Backup settings cannot contain double quotes.")
     if not value:
         return ""
     if value.strip() != value or any(character.isspace() for character in value):

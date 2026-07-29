@@ -1,0 +1,11 @@
+{
+  "name": "setuora-master-quality",
+  "private": true,
+  "scripts": {
+    "format": "prettier --write \"app/static/**/*.{js,css,svg}\" \"docs/**/*.md\" README.md compose.yaml deployment/tailscale/serve.json",
+    "format:check": "prettier --check \"app/static/**/*.{js,css,svg}\" \"docs/**/*.md\" README.md compose.yaml deployment/tailscale/serve.json"
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
+}

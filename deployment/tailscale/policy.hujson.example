@@ -1,0 +1,30 @@
+{
+  // Replace this address with the people allowed to administer Setuora.
+  "groups": {
+    "group:setuora-operators": [
+      "operator@example.com",
+    ],
+  },
+
+  // Generate one-off, tagged, non-ephemeral auth keys for Master and each Lite node.
+  "tagOwners": {
+    "tag:setuora-master": ["autogroup:admin"],
+    "tag:setuora-lite": ["autogroup:admin"],
+  },
+
+  // Lite nodes can reach only Master's HTTPS endpoint. There is deliberately no
+  // Lite-to-Lite grant. Operators can reach the same HTTPS application and must
+  // also authenticate with their individual Setuora account.
+  "grants": [
+    {
+      "src": ["tag:setuora-lite"],
+      "dst": ["tag:setuora-master"],
+      "ip": ["tcp:443"],
+    },
+    {
+      "src": ["group:setuora-operators"],
+      "dst": ["tag:setuora-master"],
+      "ip": ["tcp:443"],
+    },
+  ],
+}

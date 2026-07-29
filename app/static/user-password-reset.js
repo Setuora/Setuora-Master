@@ -5,8 +5,7 @@
   if (!dialog || !form || !username) return;
 
   function openDialog(trigger) {
-    form.action =
-      "/users/" + encodeURIComponent(trigger.dataset.userId) + "/password";
+    form.action = "/users/" + encodeURIComponent(trigger.dataset.userId) + "/password";
     username.textContent = trigger.dataset.username;
     form.reset();
     if (dialog.showModal) {
@@ -26,13 +25,11 @@
     }
   }
 
-  document
-    .querySelectorAll("[data-reset-password]")
-    .forEach(function (trigger) {
-      trigger.addEventListener("click", function () {
-        openDialog(trigger);
-      });
+  document.querySelectorAll("[data-reset-password]").forEach(function (trigger) {
+    trigger.addEventListener("click", function () {
+      openDialog(trigger);
     });
+  });
   dialog.querySelectorAll("[data-reset-close]").forEach(function (trigger) {
     trigger.addEventListener("click", closeDialog);
   });

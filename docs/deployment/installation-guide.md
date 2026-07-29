@@ -1,113 +1,70 @@
 # Setuora Master Installation
 
-This guide installs the private Master application. It does not deploy the
-public Node Sync edge, WireGuard, PostgreSQL, an administrative VPN, or Tally.
+The supported installation is the same on Linux and Windows: Docker Compose
+runs Setuora Master and a Tailscale sidecar. Start with the complete
+[universal deployment guide](universal-deployment.md).
 
-## Target host
+## Host requirements
 
-Use a dedicated Windows 11 or supported Windows Server machine on the protected
-Tally network. The pilot requires Python 3.11, Git, sufficient disk space for
-the database and verified backups, and administrator access for service setup.
+- Linux with Docker Engine and Compose v2, or Windows with Docker Desktop;
+- outbound Internet access for image pulls and Tailscale;
+- sufficient persistent storage for the database and verified backups;
+- a Tailscale tagged auth key;
+- access to Tally Prime on the Docker host or a protected LAN endpoint.
+
+No public IP, public DNS, router port-forward, Caddy process, or operating-system
+service installer is required.
 
 Keep these endpoints private:
 
-- Uvicorn: `127.0.0.1:8000`
-- Tally gateway: normally `127.0.0.1:9000`
-- SQLite or PostgreSQL
-- administrative HTTPS
+- Uvicorn: container network port `8000`, mapped only to host loopback;
+- Tally gateway: port `9000` on the Docker host or protected LAN;
+- SQLite/PostgreSQL and backup files;
+- the Docker control socket.
 
-Only the separate public edge may accept Internet traffic, and it forwards only
-the exact Node Sync paths described in the
-[Internet-edge guide](master-internet-edge.md).
+## Install
 
-## Automated Windows installation
+Clone the repository and run:
 
-Run from an Administrator terminal:
-
-```powershell
-.\Setuora.exe setup --install-dir C:\Setuora-Master
+```bash
+python deploy.py setup
 ```
 
-The utility:
+The command is identical in Linux shells and Windows PowerShell. If Python is
+not installed on the host:
 
-- installs Git and Python 3.11 when approved and required;
-- downloads the Setuora Master repository;
-- creates the virtual environment;
-- installs `requirements.lock` with hash verification;
-- creates or preserves `.env`, `data\`, and `logs\`;
-- forces `SETUORA_APP_MODE=master`;
-- runs import and dependency checks;
-- can configure private-LAN HTTPS;
-- can install the automatic Windows services.
+1. copy `.env.example` to `.env`;
+2. replace the application secret, administrator password, and Tailscale key;
+3. apply the example Tailscale policy;
+4. run `docker compose up -d --build`;
+5. run `docker compose exec tailscale tailscale status` to find the URL.
 
-The generated private Caddy configuration is not the public edge. Skip it when
-an approved private reverse proxy already exists:
+The application and Tailscale state live in persistent Docker volumes, not in
+the container layers.
 
-```powershell
-.\Setuora.exe setup --with-caddy=false
+## Verify
+
+```bash
+python deploy.py status
 ```
 
-## Manual installation
-
-```powershell
-git clone https://github.com/Setuora/Setuora-Master.git C:\Setuora-Master
-cd C:\Setuora-Master
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements.lock
-copy .env.example .env
-```
-
-Set unique secrets and reviewed hostnames in `.env`:
+The local health endpoint is:
 
 ```text
-SETUORA_APP_MODE=master
-APP_NAME=Setuora Master
-APP_SECRET_KEY=<long-random-secret>
-BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=<unique-first-login-password>
-DATABASE_URL=sqlite:///./data/setuora.db
-SESSION_COOKIE_SECURE=true
-TRUSTED_HOSTS=master-admin.internal,sync.example.com,127.0.0.1,localhost
+http://127.0.0.1:8000/health
 ```
 
-Do not place secrets in source control or support messages.
-
-## Start and verify
-
-```powershell
-.\scripts\start_setuora.bat
-```
-
-Verify locally:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
-```
-
-Expected result:
+Expected response:
 
 ```json
-{"status":"ok","role":"master"}
+{ "status": "ok", "role": "master" }
 ```
 
-Confirm that the administrative site is reachable only from the protected
-management network and that public requests to non-Node-Sync paths are rejected
-at the edge.
-
-## Service installation
-
-The automated setup can install the services. For a manual NSSM installation,
-follow [windows-service.md](windows-service.md).
+Open the private HTTPS address printed by setup from an operator device admitted
+to the tailnet. Verify secure cookies, login/logout, security headers, and role
+restrictions.
 
 ## Updates
-
-```powershell
-.\Setuora.exe update
-```
-
-The updater requires a clean source checkout, verifies the downloaded revision,
-installs pinned dependencies, runs validation, and preserves `.env`, databases,
-and backups.
 
 Before an update:
 
@@ -117,10 +74,19 @@ Before an update:
 4. schedule a low-traffic maintenance window;
 5. keep a tested rollback package.
 
+After updating the source, run:
+
+```bash
+python deploy.py update
+```
+
+The command rebuilds the image and preserves `.env`, database, backups, and the
+Tailscale identity.
+
 ## Production gates
 
-The Windows installer produces only the bounded single-process pilot. Before an
-Internet rollout, complete PostgreSQL migration, formal schema migrations,
-shared rate limiting, worker leasing, encrypted offsite recovery, monitoring,
-key-rotation runbooks, and every acceptance test in
-[master-internet-edge.md](master-internet-edge.md).
+The universal installer produces the bounded single-process SQLite pilot.
+Before production scale, complete PostgreSQL migration, formal schema
+migrations, shared rate limiting, worker leasing, encrypted offsite recovery,
+monitoring, key-rotation runbooks, and every acceptance test in
+[remote-franchise-connectivity.md](remote-franchise-connectivity.md).

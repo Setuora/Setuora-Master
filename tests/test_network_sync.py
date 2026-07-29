@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -30,7 +30,7 @@ from app.services.node_auth import (
     provision_node_credential,
 )
 
-NOW = datetime(2026, 7, 29, 12, 0, tzinfo=timezone.utc).isoformat()
+NOW = datetime(2026, 7, 29, 12, 0, tzinfo=UTC).isoformat()
 
 
 def item(serial_number: str, *, status: str = "IN_STOCK", product_code: str = "SKU-1"):
@@ -128,9 +128,7 @@ def test_credentials_store_only_a_hash_and_authenticate(api):
     assert parsed is not None
     key_id, plaintext_secret = parsed
 
-    credential = db_session.scalar(
-        select(NodeCredential).where(NodeCredential.key_id == key_id)
-    )
+    credential = db_session.scalar(select(NodeCredential).where(NodeCredential.key_id == key_id))
     assert credential is not None
     assert len(credential.secret_hash) == 64
     assert credential.secret_hash != plaintext_secret
@@ -266,12 +264,8 @@ def test_purchase_then_sale_mirrors_inventory_and_queues_tally(api):
     assert response.status_code == 200, response.text
     assert response.json()["data"]["last_sequence"] == 2
 
-    serial = db_session.scalar(
-        select(Serial).where(Serial.serial_number == "QR-PURCHASE-SALE")
-    )
-    stock = db_session.scalar(
-        select(NetworkStock).where(NetworkStock.serial_id == serial.id)
-    )
+    serial = db_session.scalar(select(Serial).where(Serial.serial_number == "QR-PURCHASE-SALE"))
+    stock = db_session.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
     assert serial.status == "SOLD"
     assert stock.status == "SOLD"
     assert stock.current_franchise_id == node.id
@@ -351,8 +345,7 @@ def test_dispatch_partial_and_full_receipt_move_global_ownership(api):
 
     db_session.refresh(transfer)
     stocks = {
-        row.serial.serial_number: row
-        for row in db_session.scalars(select(NetworkStock)).all()
+        row.serial.serial_number: row for row in db_session.scalars(select(NetworkStock)).all()
     }
     assert stocks["QR-TRANSFER-1"].current_franchise_id == destination.id
     assert stocks["QR-TRANSFER-1"].status == "IN_STOCK"
@@ -380,16 +373,18 @@ def test_dispatch_partial_and_full_receipt_move_global_ownership(api):
         for row in db_session.scalars(select(NetworkStock)).all()
     )
     report_rows = _movement_rows(db_session)
-    assert sum(
-        int(row["transferred_out"])
-        for row in report_rows
-        if row["franchise"].id == source.id
-    ) == 2
-    assert sum(
-        int(row["transferred_in"])
-        for row in report_rows
-        if row["franchise"].id == destination.id
-    ) == 2
+    assert (
+        sum(int(row["transferred_out"]) for row in report_rows if row["franchise"].id == source.id)
+        == 2
+    )
+    assert (
+        sum(
+            int(row["transferred_in"])
+            for row in report_rows
+            if row["franchise"].id == destination.id
+        )
+        == 2
+    )
 
     receipt_commands = db_session.scalars(
         select(NodeCommand).where(NodeCommand.target_franchise_id == source.id)
@@ -431,17 +426,23 @@ def test_snapshot_cannot_resurrect_terminal_stock(
     node, api_key = create_node_with_key(db_session, terminal_status)
     serial_number = f"QR-NO-RESURRECT-{terminal_status}"
 
-    assert post(
-        api,
-        api_key,
-        event(1, "STOCK_SNAPSHOT", [item(serial_number)]),
-    ).status_code == 200
+    assert (
+        post(
+            api,
+            api_key,
+            event(1, "STOCK_SNAPSHOT", [item(serial_number)]),
+        ).status_code
+        == 200
+    )
     terminal = item(serial_number, status=terminal_status)
-    assert post(
-        api,
-        api_key,
-        event(2, terminal_event_type, [terminal], party_name="Counterparty"),
-    ).status_code == 200
+    assert (
+        post(
+            api,
+            api_key,
+            event(2, terminal_event_type, [terminal], party_name="Counterparty"),
+        ).status_code
+        == 200
+    )
 
     resurrection = item(serial_number, status="IN_STOCK")
     resurrection["warehouse"] = "UNTRUSTED-RESTOCK"
@@ -453,12 +454,8 @@ def test_snapshot_cannot_resurrect_terminal_stock(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "STOCK_STATUS_CONFLICT"
-    serial = db_session.scalar(
-        select(Serial).where(Serial.serial_number == serial_number)
-    )
-    stock = db_session.scalar(
-        select(NetworkStock).where(NetworkStock.serial_id == serial.id)
-    )
+    serial = db_session.scalar(select(Serial).where(Serial.serial_number == serial_number))
+    stock = db_session.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
     db_session.refresh(node)
     assert serial.status == terminal_status
     assert stock.status == terminal_status
@@ -468,13 +465,16 @@ def test_snapshot_cannot_resurrect_terminal_stock(
 
 def test_snapshot_same_status_relocation_updates_only_metadata(api):
     api, db_session = api
-    node, api_key = create_node_with_key(db_session, "RELOCATE")
+    _node, api_key = create_node_with_key(db_session, "RELOCATE")
     serial_number = "QR-SNAPSHOT-RELOCATE"
-    assert post(
-        api,
-        api_key,
-        event(1, "STOCK_SNAPSHOT", [item(serial_number)]),
-    ).status_code == 200
+    assert (
+        post(
+            api,
+            api_key,
+            event(1, "STOCK_SNAPSHOT", [item(serial_number)]),
+        ).status_code
+        == 200
+    )
 
     relocated = item(serial_number)
     relocated["warehouse"] = "SECONDARY"
@@ -489,12 +489,8 @@ def test_snapshot_same_status_relocation_updates_only_metadata(api):
         "created": 0,
         "updated": 1,
     }
-    serial = db_session.scalar(
-        select(Serial).where(Serial.serial_number == serial_number)
-    )
-    stock = db_session.scalar(
-        select(NetworkStock).where(NetworkStock.serial_id == serial.id)
-    )
+    serial = db_session.scalar(select(Serial).where(Serial.serial_number == serial_number))
+    stock = db_session.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
     assert serial.status == "IN_STOCK"
     assert stock.status == "IN_STOCK"
     assert serial.warehouse == "SECONDARY"
@@ -506,11 +502,14 @@ def test_valid_replacement_retires_old_and_preserves_origin_product(api):
     node, api_key = create_node_with_key(db_session, "REPLACE")
     old_number = "QR-REPLACE-OLD"
     new_number = "QR-REPLACE-NEW"
-    assert post(
-        api,
-        api_key,
-        event(1, "STOCK_SNAPSHOT", [item(old_number)]),
-    ).status_code == 200
+    assert (
+        post(
+            api,
+            api_key,
+            event(1, "STOCK_SNAPSHOT", [item(old_number)]),
+        ).status_code
+        == 200
+    )
 
     old_item = item(old_number, status="INVALID")
     old_item["warehouse"] = "REPLACEMENT-SHELF"
@@ -528,12 +527,8 @@ def test_valid_replacement_retires_old_and_preserves_origin_product(api):
     )
 
     assert response.status_code == 200, response.text
-    old_serial = db_session.scalar(
-        select(Serial).where(Serial.serial_number == old_number)
-    )
-    replacement = db_session.scalar(
-        select(Serial).where(Serial.serial_number == new_number)
-    )
+    old_serial = db_session.scalar(select(Serial).where(Serial.serial_number == old_number))
+    replacement = db_session.scalar(select(Serial).where(Serial.serial_number == new_number))
     old_stock = db_session.scalar(
         select(NetworkStock).where(NetworkStock.serial_id == old_serial.id)
     )
@@ -582,11 +577,14 @@ def test_invalid_replacement_is_atomic(
     node, api_key = create_node_with_key(db_session, expected_code[-8:])
     old_number = f"QR-INVALID-OLD-{new_status}-{new_product_code}"
     new_number = f"QR-INVALID-NEW-{new_status}-{new_product_code}"
-    assert post(
-        api,
-        api_key,
-        event(1, "STOCK_SNAPSHOT", [item(old_number)]),
-    ).status_code == 200
+    assert (
+        post(
+            api,
+            api_key,
+            event(1, "STOCK_SNAPSHOT", [item(old_number)]),
+        ).status_code
+        == 200
+    )
 
     response = post(
         api,
@@ -608,19 +606,18 @@ def test_invalid_replacement_is_atomic(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == expected_code
-    old_serial = db_session.scalar(
-        select(Serial).where(Serial.serial_number == old_number)
-    )
+    old_serial = db_session.scalar(select(Serial).where(Serial.serial_number == old_number))
     assert old_serial.status == "IN_STOCK"
     assert old_serial.active is True
     assert old_serial.replaced_by_id is None
-    assert db_session.scalar(
-        select(Serial).where(Serial.serial_number == new_number)
-    ) is None
-    assert db_session.scalar(
-        select(InventoryTransaction).where(
-            InventoryTransaction.transaction_type == "QR_REPLACEMENT"
+    assert db_session.scalar(select(Serial).where(Serial.serial_number == new_number)) is None
+    assert (
+        db_session.scalar(
+            select(InventoryTransaction).where(
+                InventoryTransaction.transaction_type == "QR_REPLACEMENT"
+            )
         )
-    ) is None
+        is None
+    )
     db_session.refresh(node)
     assert node.last_sequence == 1

@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from urllib.error import URLError
 from urllib.request import Request, urlopen
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET  # nosec B405
 
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring as safe_fromstring
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import Product, TallyMasterConfirmation, User, utc_now
 from app.services.settings import get_all_settings, parse_sales_gst_ledger_mappings
+from app.services.tally_endpoint import build_tally_url, read_tally_response
 
 
 @dataclass(frozen=True)
@@ -61,7 +64,13 @@ def _status(name: str | None) -> str:
     return "READY" if name and name.strip() else "MISSING"
 
 
-def _add(requirements: dict[tuple[str, str], MasterRequirement], master_type: str, name: str, source: str, detail: str) -> None:
+def _add(
+    requirements: dict[tuple[str, str], MasterRequirement],
+    master_type: str,
+    name: str,
+    source: str,
+    detail: str,
+) -> None:
     clean = (name or "").strip()
     key = (master_type, clean)
     if key in requirements:
@@ -81,8 +90,20 @@ def collect_master_requirements(db: Session) -> list[MasterRequirement]:
     settings = get_all_settings(db)
     requirements: dict[tuple[str, str], MasterRequirement] = {}
 
-    _add(requirements, "Company", settings["company_name"], "Settings", "Must be the open Tally company")
-    _add(requirements, "Ledger", settings["round_off_ledger_name"], "Settings", "Round off posting ledger")
+    _add(
+        requirements,
+        "Company",
+        settings["company_name"],
+        "Settings",
+        "Must be the open Tally company",
+    )
+    _add(
+        requirements,
+        "Ledger",
+        settings["round_off_ledger_name"],
+        "Settings",
+        "Round off posting ledger",
+    )
     mappings = parse_sales_gst_ledger_mappings(settings.get("sales_gst_ledger_mappings"))
     for gst_rate, ledgers in mappings.items():
         source = f"Sales GST {gst_rate}% mapping"
@@ -92,10 +113,14 @@ def collect_master_requirements(db: Session) -> list[MasterRequirement]:
         if ledgers["igst"]:
             _add(requirements, "Ledger", ledgers["igst"], source, "IGST posting ledger")
 
-    products = db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.product_code)).all()
+    products = db.scalars(
+        select(Product).where(Product.active.is_(True)).order_by(Product.product_code)
+    ).all()
     for product in products:
         source = f"Product {product.product_code}"
-        _add(requirements, "Stock Item", product.tally_stock_item_name, source, product.product_name)
+        _add(
+            requirements, "Stock Item", product.tally_stock_item_name, source, product.product_name
+        )
         _add(requirements, "Unit", product.unit, source, "Product unit of measure")
         _add(requirements, "HSN", product.hsn, source, f"GST rate {product.gst_rate}%")
 
@@ -103,11 +128,15 @@ def collect_master_requirements(db: Session) -> list[MasterRequirement]:
 
 
 def confirmation_lookup(db: Session) -> dict[str, TallyMasterConfirmation]:
-    rows = db.scalars(select(TallyMasterConfirmation).options(selectinload(TallyMasterConfirmation.confirmed_by))).all()
+    rows = db.scalars(
+        select(TallyMasterConfirmation).options(selectinload(TallyMasterConfirmation.confirmed_by))
+    ).all()
     return {f"{row.master_type}|{row.master_name}": row for row in rows}
 
 
-def confirm_master(db: Session, user: User, master_type: str, master_name: str, source: str, notes: str = "") -> None:
+def confirm_master(
+    db: Session, user: User, master_type: str, master_name: str, source: str, notes: str = ""
+) -> None:
     clean_type = master_type.strip()
     clean_name = master_name.strip()
     row = db.scalar(
@@ -146,9 +175,13 @@ def remove_confirmation(db: Session, master_type: str, master_name: str) -> None
         db.commit()
 
 
-def readiness_counts(requirements: list[MasterRequirement], confirmations: dict[str, TallyMasterConfirmation]) -> dict[str, int]:
+def readiness_counts(
+    requirements: list[MasterRequirement], confirmations: dict[str, TallyMasterConfirmation]
+) -> dict[str, int]:
     missing = sum(1 for item in requirements if item.local_status == "MISSING")
-    confirmed = sum(1 for item in requirements if item.local_status == "READY" and item.key in confirmations)
+    confirmed = sum(
+        1 for item in requirements if item.local_status == "READY" and item.key in confirmations
+    )
     ready = sum(1 for item in requirements if item.local_status == "READY")
     return {
         "total": len(requirements),
@@ -246,7 +279,9 @@ def build_sales_book_xml(company_name: str, from_date: date, to_date: date) -> s
     static_variables = envelope.find("./BODY/DESC/STATICVARIABLES")
     if static_variables is None:  # pragma: no cover - constructed immediately above
         raise RuntimeError("Tally request is missing static variables")
-    ET.SubElement(static_variables, "SVFROMDATE", {"TYPE": "Date"}).text = from_date.strftime("%Y%m%d")
+    ET.SubElement(static_variables, "SVFROMDATE", {"TYPE": "Date"}).text = from_date.strftime(
+        "%Y%m%d"
+    )
     ET.SubElement(static_variables, "SVTODATE", {"TYPE": "Date"}).text = to_date.strftime("%Y%m%d")
     collection = next(node for node in tdl_message if _local_tag(node) == "COLLECTION")
     ET.SubElement(collection, "FILTER").text = "SetuoraSalesVoucherFilter"
@@ -255,10 +290,7 @@ def build_sales_book_xml(company_name: str, from_date: date, to_date: date) -> s
         "SYSTEM",
         {"TYPE": "Formulae", "NAME": "SetuoraSalesVoucherFilter"},
     )
-    formula.text = (
-        "$$IsSales:$VoucherTypeName "
-        "AND $Date >= ##SVFromDate AND $Date <= ##SVToDate"
-    )
+    formula.text = "$$IsSales:$VoucherTypeName AND $Date >= ##SVFromDate AND $Date <= ##SVToDate"
     return ET.tostring(envelope, encoding="unicode")
 
 
@@ -318,15 +350,17 @@ def _sanitize_tally_xml(body: str) -> str:
 
 
 def _post_read_request(settings: dict[str, str], xml: str) -> tuple[str, ET.Element]:
-    host = settings.get("tally_host", "").strip()
-    port = settings.get("tally_port", "").strip()
-    if not host or not port:
-        raise TallyDataError("Tally host and port are not configured.")
-    url = f"http://{host}:{port}"
-    request = Request(url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST")
     try:
-        with urlopen(request, timeout=8) as response:
-            body = response.read().decode("utf-8", errors="replace")
+        url = build_tally_url(settings)
+    except ValueError as exc:
+        raise TallyDataError(str(exc)) from exc
+    request = Request(
+        url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST"
+    )
+    try:
+        # build_tally_url fixes the scheme and rejects URL syntax in the host.
+        with urlopen(request, timeout=8) as response:  # nosec B310
+            body = read_tally_response(response)
     except URLError as exc:
         reason = getattr(exc, "reason", exc)
         raise TallyDataError(f"Tally gateway did not respond: {reason}") from exc
@@ -334,12 +368,14 @@ def _post_read_request(settings: dict[str, str], xml: str) -> tuple[str, ET.Elem
         raise TallyDataError("Tally gateway timed out.") from exc
     except OSError as exc:
         raise TallyDataError(f"Tally gateway did not respond: {exc}") from exc
+    except ValueError as exc:
+        raise TallyDataError(str(exc)) from exc
     if not body.strip():
         raise TallyDataError("Tally gateway returned an empty response.")
     sanitized_body = _sanitize_tally_xml(body)
     try:
-        root = ET.fromstring(sanitized_body)
-    except ET.ParseError as exc:
+        root = safe_fromstring(sanitized_body)
+    except (ET.ParseError, DefusedXmlException) as exc:
         raise TallyDataError("Tally gateway returned unreadable XML.") from exc
     errors = _response_errors(root)
     if errors:
@@ -416,7 +452,7 @@ def _display_tally_date(raw: str) -> str:
     clean = raw.strip()
     if len(clean) == 8 and clean.isdigit():
         try:
-            return datetime.strptime(clean, "%Y%m%d").date().isoformat()
+            return date(int(clean[:4]), int(clean[4:6]), int(clean[6:8])).isoformat()
         except ValueError:
             pass
     return clean
@@ -462,21 +498,29 @@ def fetch_tally_sales_book(
 
 def test_tally_gateway(settings: dict[str, str]) -> GatewayCheckResult:
     xml = build_company_list_xml()
-    url = f"http://{settings['tally_host']}:{settings['tally_port']}"
-    request = Request(url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST")
     try:
-        with urlopen(request, timeout=5) as response:
-            body = response.read().decode("utf-8", errors="replace")
+        url = build_tally_url(settings)
+    except ValueError as exc:
+        return GatewayCheckResult(False, str(exc))
+    request = Request(
+        url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST"
+    )
+    try:
+        # build_tally_url fixes the scheme and rejects URL syntax in the host.
+        with urlopen(request, timeout=5) as response:  # nosec B310
+            body = read_tally_response(response)
     except URLError as exc:
         return GatewayCheckResult(False, f"Tally gateway did not respond: {exc.reason}")
     except TimeoutError:
         return GatewayCheckResult(False, "Tally gateway timed out")
+    except ValueError as exc:
+        return GatewayCheckResult(False, str(exc))
     excerpt = " ".join(body.split())[:500]
     if not body.strip():
         return GatewayCheckResult(False, "Tally gateway returned an empty response")
     try:
-        root = ET.fromstring(body)
-    except ET.ParseError:
+        root = safe_fromstring(body)
+    except (ET.ParseError, DefusedXmlException):
         return GatewayCheckResult(False, "Tally gateway returned unreadable XML", excerpt)
 
     errors = [
@@ -485,10 +529,16 @@ def test_tally_gateway(settings: dict[str, str]) -> GatewayCheckResult:
         if node.tag.upper().endswith("LINEERROR") and node.text and node.text.strip()
     ]
     if errors:
-        return GatewayCheckResult(False, f"Tally rejected gateway check: {'; '.join(errors)}", excerpt)
+        return GatewayCheckResult(
+            False, f"Tally rejected gateway check: {'; '.join(errors)}", excerpt
+        )
 
     status = next(
-        (node.text.strip() for node in root.iter() if node.tag.upper().endswith("STATUS") and node.text),
+        (
+            node.text.strip()
+            for node in root.iter()
+            if node.tag.upper().endswith("STATUS") and node.text
+        ),
         None,
     )
     if status == "0":

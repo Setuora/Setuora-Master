@@ -165,7 +165,7 @@ def test_crash_after_tally_success_reuses_frozen_payload_and_remote_id(db_sessio
     except RuntimeError:
         db_session.rollback()
     else:
-        assert False, "the simulated crash must interrupt the success commit"
+        raise AssertionError("the simulated crash must interrupt the success commit")
     event.remove(db_session, "before_commit", fail_success_commit)
 
     db_session.refresh(batch)

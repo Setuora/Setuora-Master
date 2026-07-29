@@ -41,8 +41,8 @@ class _FakeResponse:
     def __exit__(self, *exc):
         return False
 
-    def read(self):
-        return self._body
+    def read(self, size=-1):
+        return self._body if size < 0 else self._body[:size]
 
 
 def test_post_to_tally_treats_zero_created_as_failure(monkeypatch):
@@ -59,6 +59,17 @@ def test_post_to_tally_accepts_created_voucher(monkeypatch):
     monkeypatch.setattr(tally_service, "urlopen", lambda *a, **k: _FakeResponse(body))
     result = post_to_tally("<xml/>", {"tally_host": "localhost", "tally_port": "9000"})
     assert result.reference == "CREATED=1; ALTERED=0"
+
+
+def test_post_to_tally_rejects_xml_entities(monkeypatch):
+    body = (
+        '<!DOCTYPE response [<!ENTITY secret SYSTEM "file:///etc/passwd">]>'
+        "<RESPONSE><CREATED>&secret;</CREATED></RESPONSE>"
+    )
+    monkeypatch.setattr(tally_service, "urlopen", lambda *a, **k: _FakeResponse(body))
+
+    with pytest.raises(TallySyncError, match="unreadable XML"):
+        post_to_tally("<xml/>", {"tally_host": "localhost", "tally_port": "9000"})
 
 
 VALID_SETTINGS = {
@@ -254,8 +265,7 @@ def test_sale_voucher_uses_product_gst_rate_ledger_mappings(db_session):
     xml = build_voucher_xml(batch, settings)
     root = ET.fromstring(xml)
     allocation_names = [
-        entry.findtext("LEDGERNAME")
-        for entry in root.iter("ACCOUNTINGALLOCATIONS.LIST")
+        entry.findtext("LEDGERNAME") for entry in root.iter("ACCOUNTINGALLOCATIONS.LIST")
     ]
     ledger_amounts = {
         entry.findtext("LEDGERNAME"): Decimal(entry.findtext("AMOUNT"))
@@ -361,8 +371,7 @@ def test_sale_voucher_uses_mapping_with_removed_legacy_defaults_blank(db_session
         "cgst_ledger_name": "",
         "sgst_ledger_name": "",
         "sales_gst_ledger_mappings": (
-            "5 | Sales @ 5% | Output CGST @ 2.5% | "
-            "Output SGST @ 2.5% | Output IGST @ 5%"
+            "5 | Sales @ 5% | Output CGST @ 2.5% | Output SGST @ 2.5% | Output IGST @ 5%"
         ),
     }
 
@@ -403,8 +412,7 @@ def test_interstate_sale_voucher_uses_mapped_igst_ledger(db_session):
     settings = {
         **VALID_SETTINGS,
         "sales_gst_ledger_mappings": (
-            "5 | Sales @ 5% | Output CGST @ 2.5% | "
-            "Output SGST @ 2.5% | Output IGST @ 5%"
+            "5 | Sales @ 5% | Output CGST @ 2.5% | Output SGST @ 2.5% | Output IGST @ 5%"
         ),
     }
 
@@ -489,7 +497,9 @@ def test_purchase_and_sale_batches_sync_to_tally(monkeypatch, db_session):
     db_session.commit()
     update_settings(db_session, {**VALID_SETTINGS, "tally_enabled": "true"})
     purchase_serial = generate_serials(db_session, purchase_product, 1)[0]
-    sale_serial = generate_serials(db_session, sale_product, 1, initial_status=SerialStatus.IN_STOCK)[0]
+    sale_serial = generate_serials(
+        db_session, sale_product, 1, initial_status=SerialStatus.IN_STOCK
+    )[0]
     purchase_batch = create_batch(db_session, user, BatchType.PURCHASE, "Supplier", "")
     sale_batch = create_batch(db_session, user, BatchType.SALE, "Customer", "")
     add_serial_to_batch(db_session, purchase_batch, user, purchase_serial.serial_number)

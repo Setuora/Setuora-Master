@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 
 IST = timezone(timedelta(hours=5, minutes=30))
 REPORT_DATE_FORMAT = "%d-%m-%Y"
@@ -22,7 +22,7 @@ def report_date(value: object) -> str:
 
 def _local_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
     return value.astimezone(IST)
 
 

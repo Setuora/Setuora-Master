@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
 from uuid import uuid4
 
@@ -21,7 +21,7 @@ from app.database import Base
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Role(str, Enum):
@@ -39,9 +39,7 @@ class Role(str, Enum):
 def normalize_role_values(value) -> tuple[str, ...]:
     if value is None:
         return ()
-    if isinstance(value, Role):
-        items = [value]
-    elif isinstance(value, str):
+    if isinstance(value, (Role, str)):
         items = [value]
     else:
         try:
@@ -171,7 +169,9 @@ class User(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     batches: Mapped[list["Batch"]] = relationship(back_populates="user")
-    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(back_populates="user")
+    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(
+        back_populates="user"
+    )
     tally_access_assignments: Mapped[list["UserTallyAccess"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
@@ -208,7 +208,9 @@ class Product(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     serials: Mapped[list["Serial"]] = relationship(back_populates="product")
-    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(back_populates="product")
+    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(
+        back_populates="product"
+    )
     audit_assignments: Mapped[list["AuditAssignment"]] = relationship(back_populates="product")
 
 
@@ -246,7 +248,9 @@ class StorageLocation(Base):
 
     @property
     def full_path(self) -> str:
-        return " / ".join((self.warehouse, self.zone, self.section, self.rack, self.shelf, self.bin))
+        return " / ".join(
+            (self.warehouse, self.zone, self.section, self.rack, self.shelf, self.bin)
+        )
 
 
 class Serial(Base):
@@ -255,11 +259,15 @@ class Serial(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     serial_number: Mapped[str] = mapped_column(String(140), unique=True, index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
-    status: Mapped[str] = mapped_column(String(40), default=SerialStatus.GENERATED.value, index=True)
+    status: Mapped[str] = mapped_column(
+        String(40), default=SerialStatus.GENERATED.value, index=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     replaced_by_id: Mapped[int | None] = mapped_column(ForeignKey("serials.id"), nullable=True)
-    label_printed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    label_printed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     label_printed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     product_batch_number: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     mfg_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -270,13 +278,19 @@ class Serial(Base):
         default=WarehouseLevel.COMPANY_WAREHOUSE.value,
         index=True,
     )
-    location_id: Mapped[int | None] = mapped_column(ForeignKey("storage_locations.id"), nullable=True, index=True)
+    location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("storage_locations.id"), nullable=True, index=True
+    )
 
     product: Mapped[Product] = relationship(back_populates="serials")
     location: Mapped[StorageLocation | None] = relationship(back_populates="serials")
     batch_items: Mapped[list["BatchItem"]] = relationship(back_populates="serial")
-    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(back_populates="serial")
-    audit_assignment_items: Mapped[list["AuditAssignmentItem"]] = relationship(back_populates="serial")
+    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(
+        back_populates="serial"
+    )
+    audit_assignment_items: Mapped[list["AuditAssignmentItem"]] = relationship(
+        back_populates="serial"
+    )
 
     @property
     def display_status(self) -> str:
@@ -303,10 +317,14 @@ class StockRelocation(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     device_used: Mapped[str] = mapped_column(String(240))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     product: Mapped[Product] = relationship()
-    previous_location: Mapped[StorageLocation | None] = relationship(foreign_keys=[previous_location_id])
+    previous_location: Mapped[StorageLocation | None] = relationship(
+        foreign_keys=[previous_location_id]
+    )
     new_location: Mapped[StorageLocation] = relationship(foreign_keys=[new_location_id])
     user: Mapped[User] = relationship()
     serial_links: Mapped[list["RelocationSerial"]] = relationship(back_populates="relocation")
@@ -334,7 +352,9 @@ class AuditAssignment(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     product: Mapped[Product] = relationship(back_populates="audit_assignments")
     auditor: Mapped[User] = relationship(foreign_keys=[auditor_id])
@@ -393,18 +413,26 @@ class Batch(Base):
     last_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sync_remote_id: Mapped[str | None] = mapped_column(String(80), nullable=True, unique=True)
     sync_request_xml: Mapped[str | None] = mapped_column(Text, nullable=True)
-    sync_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    sync_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="batches")
     audit_assignment: Mapped[AuditAssignment | None] = relationship(back_populates="batches")
-    items: Mapped[list["BatchItem"]] = relationship(back_populates="batch", cascade="all, delete-orphan")
+    items: Mapped[list["BatchItem"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
     scan_logs: Mapped[list["ScanLog"]] = relationship(back_populates="batch")
     sync_attempts: Mapped[list["SyncAttempt"]] = relationship(back_populates="batch")
-    audit_findings: Mapped[list["AuditFinding"]] = relationship(back_populates="batch", cascade="all, delete-orphan")
-    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(back_populates="batch")
+    audit_findings: Mapped[list["AuditFinding"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
+    inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(
+        back_populates="batch"
+    )
 
 
 class BatchItem(Base):
@@ -422,7 +450,9 @@ class BatchItem(Base):
         ForeignKey("storage_locations.id"), nullable=True, index=True
     )
     shelf_verified_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    shelf_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shelf_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     batch: Mapped[Batch] = relationship(back_populates="items")
@@ -443,7 +473,9 @@ class ScanLog(Base):
     status: Mapped[str] = mapped_column(String(40), index=True)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     tally_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     batch: Mapped[Batch | None] = relationship(back_populates="scan_logs")
     serial: Mapped[Serial | None] = relationship()
@@ -455,9 +487,15 @@ class InventoryTransaction(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     transaction_type: Mapped[str] = mapped_column(String(40), index=True)
-    serial_id: Mapped[int | None] = mapped_column(ForeignKey("serials.id"), nullable=True, index=True)
-    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True, index=True)
-    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True, index=True)
+    serial_id: Mapped[int | None] = mapped_column(
+        ForeignKey("serials.id"), nullable=True, index=True
+    )
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id"), nullable=True, index=True
+    )
+    batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("batches.id"), nullable=True, index=True
+    )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     serial_number: Mapped[str | None] = mapped_column(String(140), nullable=True, index=True)
     status_from: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -466,7 +504,9 @@ class InventoryTransaction(Base):
     tally_reference: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
     reference_number: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     serial: Mapped[Serial | None] = relationship(back_populates="inventory_transactions")
     product: Mapped[Product | None] = relationship(back_populates="inventory_transactions")
@@ -483,7 +523,9 @@ class SyncAttempt(Base):
     request_xml: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_xml: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     batch: Mapped[Batch] = relationship(back_populates="sync_attempts")
 
@@ -493,21 +535,27 @@ class Setting(Base):
 
     key: Mapped[str] = mapped_column(String(120), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
 
 
 class ChangeAudit(Base):
     __tablename__ = "change_audit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     actor_username: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     entity_type: Mapped[str] = mapped_column(String(80), index=True)
     entity_id: Mapped[str] = mapped_column(String(120), index=True)
     action: Mapped[str] = mapped_column(String(80), index=True)
     before_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     after_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     actor: Mapped[User | None] = relationship()
 
@@ -581,7 +629,9 @@ class TallyLedgerCache(Base):
     name: Mapped[str] = mapped_column(String(220), index=True)
     parent: Mapped[str] = mapped_column(String(220), default="")
     closing_balance: Mapped[str] = mapped_column(String(80), default="")
-    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    refreshed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
 
 class TallySalesVoucherCache(Base):
@@ -610,7 +660,9 @@ class TallySalesVoucherCache(Base):
     amount: Mapped[str] = mapped_column(String(80), default="")
     narration: Mapped[str] = mapped_column(Text, default="")
     tally_user: Mapped[str] = mapped_column(String(220), default="", index=True)
-    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    refreshed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
 
 class LoginAudit(Base):
@@ -621,12 +673,16 @@ class LoginAudit(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     ip_address: Mapped[str | None] = mapped_column(String(80), nullable=True)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
 
 class TallyMasterConfirmation(Base):
     __tablename__ = "tally_master_confirmations"
-    __table_args__ = (UniqueConstraint("master_type", "master_name", name="uq_tally_master_confirmation"),)
+    __table_args__ = (
+        UniqueConstraint("master_type", "master_name", name="uq_tally_master_confirmation"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     master_type: Mapped[str] = mapped_column(String(80), index=True)
@@ -634,7 +690,9 @@ class TallyMasterConfirmation(Base):
     source: Mapped[str] = mapped_column(String(220))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     confirmed_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     confirmed_by: Mapped[User] = relationship()
 
@@ -651,7 +709,9 @@ class AuditFinding(Base):
     finding_type: Mapped[str] = mapped_column(String(40), index=True)
     expected_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     scanned_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
 
     batch: Mapped[Batch] = relationship(back_populates="audit_findings")
     serial: Mapped[Serial | None] = relationship()

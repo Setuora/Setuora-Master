@@ -29,7 +29,9 @@ def test_backup_worker_start_replaces_finished_task(monkeypatch):
         async def replacement_loop():
             await asyncio.Event().wait()
 
-        monkeypatch.setattr(backup_worker, "get_settings", lambda: SimpleNamespace(automatic_backups_enabled=True))
+        monkeypatch.setattr(
+            backup_worker, "get_settings", lambda: SimpleNamespace(automatic_backups_enabled=True)
+        )
         monkeypatch.setattr(backup_worker, "backup_worker_loop", replacement_loop)
         backup_worker.start_backup_worker(app)
         replacement = getattr(app.state, backup_worker.WORKER_STATE_KEY)
@@ -52,7 +54,9 @@ def test_create_sqlite_backup_uses_configured_database(tmp_path, monkeypatch):
     connection.commit()
     connection.close()
 
-    monkeypatch.setattr(backup_service, "get_settings", lambda: SimpleNamespace(database_url=f"sqlite:///{db_path}"))
+    monkeypatch.setattr(
+        backup_service, "get_settings", lambda: SimpleNamespace(database_url=f"sqlite:///{db_path}")
+    )
     assert sqlite_database_path() == db_path.resolve()
     backup = create_sqlite_backup()
     assert backup.data.startswith(b"SQLite format 3")
@@ -75,7 +79,9 @@ def test_scheduled_backup_verifies_copies_offsite_and_prunes(tmp_path, monkeypat
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA foreign_keys=ON")
     connection.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
-    connection.execute("CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id))")
+    connection.execute(
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parent(id))"
+    )
     connection.execute("INSERT INTO parent (id) VALUES (1)")
     connection.execute("INSERT INTO child (parent_id) VALUES (1)")
     connection.commit()

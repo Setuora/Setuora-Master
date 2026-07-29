@@ -3,7 +3,7 @@ import secrets
 from functools import lru_cache
 from pathlib import Path
 
-DEFAULT_SECRET_KEY = "dev-change-me"
+DEFAULT_SECRET_KEY = "dev-change-me"  # noqa: S105 - rejected placeholder, never a valid secret
 PLACEHOLDER_SECRET_KEYS = {
     DEFAULT_SECRET_KEY,
     "change-this-before-production",
@@ -66,8 +66,12 @@ def _resolve_secret_key() -> str:
         generated = secrets.token_urlsafe(48)
         SECRET_KEY_FILE.write_text(generated, encoding="utf-8")
         return generated
-    except OSError:
-        return env_value or DEFAULT_SECRET_KEY
+    except OSError as exc:
+        if env_value:
+            return env_value
+        raise RuntimeError(
+            "APP_SECRET_KEY must be set when the persistent secret file cannot be created."
+        ) from exc
 
 
 class Settings:
@@ -92,7 +96,9 @@ class Settings:
         self.backup_offsite_directory: str = os.getenv("BACKUP_OFFSITE_DIRECTORY", "").strip()
         self.backup_interval_hours: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
         self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "14"))
-        self.backup_startup_delay_seconds: int = int(os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60"))
+        self.backup_startup_delay_seconds: int = int(
+            os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60")
+        )
         self.node_api_rate_limit_per_minute: int = int(
             os.getenv("NODE_API_RATE_LIMIT_PER_MINUTE", "120")
         )
@@ -100,9 +106,7 @@ class Settings:
         self.node_api_max_body_bytes: int = int(
             os.getenv("NODE_API_MAX_BODY_BYTES", str(5 * 1024 * 1024))
         )
-        self.franchise_offline_minutes: int = int(
-            os.getenv("FRANCHISE_OFFLINE_MINUTES", "15")
-        )
+        self.franchise_offline_minutes: int = int(os.getenv("FRANCHISE_OFFLINE_MINUTES", "15"))
 
     @property
     def using_default_secret(self) -> bool:

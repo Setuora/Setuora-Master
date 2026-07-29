@@ -33,14 +33,21 @@ def retry_pending_batches(limit: int = 10) -> int:
                     Batch.status == BatchStatus.PENDING_SYNC.value,
                     (
                         (Batch.status == BatchStatus.SYNCING.value)
-                        & (Batch.sync_started_at < utc_now() - timedelta(minutes=SYNC_LEASE_MINUTES))
+                        & (
+                            Batch.sync_started_at
+                            < utc_now() - timedelta(minutes=SYNC_LEASE_MINUTES)
+                        )
                     ),
                 ),
                 Batch.batch_type.in_(TALLY_XML_SUPPORTED_BATCH_TYPES),
             )
             .order_by(Batch.last_retry_at.is_not(None), Batch.last_retry_at, Batch.created_at)
             .limit(limit)
-            .options(selectinload(Batch.items).selectinload(BatchItem.serial).selectinload(Serial.product))
+            .options(
+                selectinload(Batch.items)
+                .selectinload(BatchItem.serial)
+                .selectinload(Serial.product)
+            )
         ).all()
         for batch in batches:
             sync_batch(db, batch)

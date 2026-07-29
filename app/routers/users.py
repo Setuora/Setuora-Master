@@ -40,9 +40,7 @@ def _users_context(
     error: str | None = None,
     success: str | None = None,
 ) -> dict[str, object]:
-    users = db.scalars(
-        select(User).where(User.deleted_at.is_(None)).order_by(User.username)
-    ).all()
+    users = db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.username)).all()
     roles = [Role.DIRECTORS, Role.ADMIN]
     if has_role(current, Role.SUPER_ADMIN):
         roles.append(Role.SUPER_ADMIN)
@@ -106,15 +104,19 @@ def create_user(
     }
     if not selected_roles.issubset(allowed_roles):
         return RedirectResponse("/users?error=role_invalid", status_code=303)
-    if (
-        Role.SUPER_ADMIN.value in selected_roles
-        and not has_role(user, Role.SUPER_ADMIN)
-    ):
+    if Role.SUPER_ADMIN.value in selected_roles and not has_role(user, Role.SUPER_ADMIN):
         return RedirectResponse("/users?error=role_forbidden", status_code=303)
     role_value = serialize_role_values(role)
     if not role_value:
         return RedirectResponse("/users?error=role_required", status_code=303)
-    db.add(User(username=username.strip().lower(), password_hash=hash_password(password), role=role_value, active=True))
+    db.add(
+        User(
+            username=username.strip().lower(),
+            password_hash=hash_password(password),
+            role=role_value,
+            active=True,
+        )
+    )
     try:
         db.commit()
     except Exception:
@@ -223,11 +225,25 @@ def delete_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     reference_count = sum(
         (
             db.scalar(select(func.count(Batch.id)).where(Batch.user_id == target.id)) or 0,
-            db.scalar(select(func.count(InventoryTransaction.id)).where(InventoryTransaction.user_id == target.id)) or 0,
+            db.scalar(
+                select(func.count(InventoryTransaction.id)).where(
+                    InventoryTransaction.user_id == target.id
+                )
+            )
+            or 0,
             db.scalar(select(func.count(ScanLog.id)).where(ScanLog.user_id == target.id)) or 0,
-            db.scalar(select(func.count(Serial.id)).where(Serial.label_printed_by_id == target.id)) or 0,
-            db.scalar(select(func.count(TallyMasterConfirmation.id)).where(TallyMasterConfirmation.confirmed_by_id == target.id)) or 0,
-            db.scalar(select(func.count(StockRelocation.id)).where(StockRelocation.user_id == target.id)) or 0,
+            db.scalar(select(func.count(Serial.id)).where(Serial.label_printed_by_id == target.id))
+            or 0,
+            db.scalar(
+                select(func.count(TallyMasterConfirmation.id)).where(
+                    TallyMasterConfirmation.confirmed_by_id == target.id
+                )
+            )
+            or 0,
+            db.scalar(
+                select(func.count(StockRelocation.id)).where(StockRelocation.user_id == target.id)
+            )
+            or 0,
         )
     )
     if reference_count:

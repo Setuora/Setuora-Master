@@ -91,7 +91,7 @@ def test_user_creation_accepts_multiple_master_roles():
         response = create_user(
             make_request(1, method="POST"),
             username="dual",
-            password="dual-pass",
+            password="dual-role-pass",
             role=["directors", "admin"],
             db=db,
         )
@@ -165,8 +165,24 @@ def test_user_delete_is_super_admin_only_and_archives_history_user():
 def test_super_admin_can_reset_another_users_password():
     engine, Session = make_session()
     with Session() as db:
-        db.add(User(id=1, username="root", password_hash=hash_password("old-root-pass"), role="super_admin", active=True))
-        db.add(User(id=2, username="staff", password_hash=hash_password("old-staff-pass"), role="sales", active=True))
+        db.add(
+            User(
+                id=1,
+                username="root",
+                password_hash=hash_password("old-root-pass"),
+                role="super_admin",
+                active=True,
+            )
+        )
+        db.add(
+            User(
+                id=2,
+                username="staff",
+                password_hash=hash_password("old-staff-pass"),
+                role="sales",
+                active=True,
+            )
+        )
         db.commit()
 
     def override_get_db():
@@ -212,9 +228,27 @@ def test_password_reset_is_super_admin_only_and_validates_input():
     engine, Session = make_session()
     original_hash = hash_password("original-pass")
     with Session() as db:
-        db.add(User(id=1, username="admin", password_hash=hash_password("admin-pass"), role="admin", active=True))
-        db.add(User(id=2, username="root", password_hash=hash_password("root-pass"), role="super_admin", active=True))
-        db.add(User(id=3, username="staff", password_hash=original_hash, role="purchase", active=True))
+        db.add(
+            User(
+                id=1,
+                username="admin",
+                password_hash=hash_password("admin-pass"),
+                role="admin",
+                active=True,
+            )
+        )
+        db.add(
+            User(
+                id=2,
+                username="root",
+                password_hash=hash_password("root-pass"),
+                role="super_admin",
+                active=True,
+            )
+        )
+        db.add(
+            User(id=3, username="staff", password_hash=original_hash, role="purchase", active=True)
+        )
         db.commit()
 
     def override_get_db():

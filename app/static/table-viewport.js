@@ -27,9 +27,15 @@
       ? headerRows[headerRows.length - 1]
       : table.querySelector("tbody > tr:not(." + EMPTY_RECORD_CLASS + ")");
     if (!referenceRow) return 1;
-    return Array.prototype.reduce.call(referenceRow.cells, function (count, cell) {
-      return count + Math.max(1, cell.colSpan || 1);
-    }, 0) || 1;
+    return (
+      Array.prototype.reduce.call(
+        referenceRow.cells,
+        function (count, cell) {
+          return count + Math.max(1, cell.colSpan || 1);
+        },
+        0,
+      ) || 1
+    );
   }
 
   function createEmptyRecord(table) {
@@ -53,7 +59,7 @@
     });
     var required = Math.max(0, MINIMUM_RECORDS - occupiedRows.length);
     var emptyRecords = Array.prototype.slice.call(
-      table.querySelectorAll("tbody > tr." + EMPTY_RECORD_CLASS)
+      table.querySelectorAll("tbody > tr." + EMPTY_RECORD_CLASS),
     );
 
     while (emptyRecords.length > required) {
@@ -65,10 +71,9 @@
       emptyRecords.push(emptyRecord);
     }
 
-    table.closest(WRAPPER_SELECTOR).style.setProperty(
-      "--table-empty-record-height",
-      Math.ceil(fallbackHeight) + "px"
-    );
+    table
+      .closest(WRAPPER_SELECTOR)
+      .style.setProperty("--table-empty-record-height", Math.ceil(fallbackHeight) + "px");
     return emptyRecords;
   }
 
@@ -86,10 +91,7 @@
     var wrapper = table.closest(WRAPPER_SELECTOR);
     if (!wrapper) return;
 
-    var visibleRows = Array.prototype.filter.call(
-      table.querySelectorAll("tbody > tr"),
-      isVisible
-    );
+    var visibleRows = Array.prototype.filter.call(table.querySelectorAll("tbody > tr"), isVisible);
     var recordRows = visibleRows.filter(function (row) {
       return !isEmptyState(row) && !row.classList.contains(EMPTY_RECORD_CLASS);
     });
@@ -116,9 +118,10 @@
 
     var caption = table.caption ? table.caption.getBoundingClientRect().height : 0;
     var header = table.tHead ? table.tHead.getBoundingClientRect().height : 0;
-    var horizontalScrollbar = table.scrollWidth > wrapper.clientWidth
-      ? Math.max(0, wrapper.offsetHeight - wrapper.clientHeight)
-      : 0;
+    var horizontalScrollbar =
+      table.scrollWidth > wrapper.clientWidth
+        ? Math.max(0, wrapper.offsetHeight - wrapper.clientHeight)
+        : 0;
     var viewportHeight = Math.ceil(caption + header + bodyHeight + horizontalScrollbar);
 
     wrapper.classList.add("table-record-viewport");

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
@@ -19,25 +19,24 @@ _DUMMY_PASSWORD_HASH = hash_password("setuora-dummy-password-never-matches")
 
 
 def recent_failed_logins(db: Session, username: str, window_minutes: int) -> int:
-    since = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
-    return db.scalar(
-        select(func.count(LoginAudit.id)).where(
-            LoginAudit.username == username,
-            LoginAudit.success.is_(False),
-            LoginAudit.created_at >= since,
+    since = datetime.now(UTC) - timedelta(minutes=window_minutes)
+    return (
+        db.scalar(
+            select(func.count(LoginAudit.id)).where(
+                LoginAudit.username == username,
+                LoginAudit.success.is_(False),
+                LoginAudit.created_at >= since,
+            )
         )
-    ) or 0
+        or 0
+    )
 
 
 @router.get("/login")
 def login_page(request: Request, db: Session = Depends(get_db)):
     user = current_user(request, db)
     if user:
-        destination = (
-            "/account/password"
-            if user.must_change_password
-            else "/"
-        )
+        destination = "/account/password" if user.must_change_password else "/"
         return RedirectResponse(destination, status_code=303)
     return templates.TemplateResponse(
         request,
@@ -56,7 +55,10 @@ def login(
     settings = get_settings()
     normalized = username.strip().lower()
 
-    if recent_failed_logins(db, normalized, settings.login_lockout_minutes) >= settings.login_max_attempts:
+    if (
+        recent_failed_logins(db, normalized, settings.login_lockout_minutes)
+        >= settings.login_max_attempts
+    ):
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -90,13 +92,9 @@ def login(
             {"request": request, "error": "Invalid username or password", "message": None},
             status_code=400,
         )
-    user.last_login_at = datetime.now(timezone.utc)
+    user.last_login_at = datetime.now(UTC)
     db.commit()
-    destination = (
-        "/account/password"
-        if user.must_change_password
-        else "/"
-    )
+    destination = "/account/password" if user.must_change_password else "/"
     redirect = RedirectResponse(destination, status_code=303)
     redirect.set_cookie(
         SESSION_COOKIE,

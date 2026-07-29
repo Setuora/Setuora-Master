@@ -1,191 +1,153 @@
 # Master/Lite Deployment Topology
 
-Status: application MVP implemented; Internet topology not deployed or approved.
+Status: application MVP and private cross-network deployment implemented;
+production scale remains gated.
 
 This document describes the deployment and trust boundaries selected by
-[ADR-001](adr-001-master-lite-control-plane.md). Master/Lite composition, Node
-Sync v1, monitoring, and transfers exist in the repositories. This does not
-replace the current LAN installation guides or prove that a public edge is
-operational. Installed LAN Caddy still uses an internal certificate, and the
-Windows setup still opens ports only to `LocalSubnet`.
+[ADR-001](adr-001-master-lite-control-plane.md). Linux and Windows use the same
+Docker Compose stack. Tailscale provides private reachability and HTTPS without
+an inbound public listener.
 
-## System Context
+## System context
 
 ```text
 ┌──────────────────────── Franchise A LAN ────────────────────────┐
 │ Phones/browsers -> Setuora Lite A -> SQLite + durable outbox    │
+│                         tag:setuora-lite                         │
 └──────────────────────────────┬──────────────────────────────────┘
-                               │ outbound HTTPS only
+                               │ outbound encrypted connection
 ┌──────────────────────── Franchise B LAN ────────────────────────┐
 │ Phones/browsers -> Setuora Lite B -> SQLite + durable outbox    │
+│                         tag:setuora-lite                         │
 └──────────────────────────────┬──────────────────────────────────┘
-                               │ outbound HTTPS only
+                               │ outbound encrypted connection
                                v
                     ┌────────────────────────┐
-                    │ Public TLS edge VPS    │
-                    │ - DNS/ACME certificate │
-                    │ - API allowlist        │
-                    │ - request limits       │
-                    │ - access audit         │
+                    │ Private Tailscale net  │
+                    │ - device identities    │
+                    │ - grants               │
+                    │ - MagicDNS + HTTPS     │
                     └───────────┬────────────┘
-                                │ WireGuard private address
+                                │ tcp:443 to tag:setuora-master
                                 v
 ┌──────────────────────── Master premises ─────────────────────────┐
-│ Private ingress -> Setuora Master modular monolith               │
+│ Tailscale Serve -> Setuora Master modular monolith               │
 │                    │          │                 │                 │
 │                    │          │                 └-> Reports/UI    │
 │                    │          └-> durable Tally queue -> Tally   │
 │                    └-> central database                          │
 │                                                                  │
-│ Operator VPN -> administrative UI                                │
+│ Operator tailnet device -> HTTPS UI -> application login         │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-The public edge and Master are separate failure and trust domains. Compromise of
-the edge must not grant direct access to Tally, the database, Windows
-administration, or backup files.
+Master and Lite make outbound connections. Separate ISPs, dynamic addresses,
+NAT, and franchise firewalls therefore need no inbound rules. Tailscale Serve,
+not Funnel, exposes Master only inside the authenticated tailnet.
 
-## Container Responsibilities
+## Responsibilities
 
 ### Setuora Lite
 
 Lite is the franchise transaction system:
 
-- provides franchise operational capture, item-label handling, and local
-  inventory pages;
-- stores local business transactions in its own database;
-- commits an outbound event with the local business transaction;
+- provides local operational capture and inventory pages;
+- commits an outbound event with each local business transaction;
 - uploads events sequentially and retries without user intervention;
-- polls commands and records command acknowledgements;
-- locks dispatched transfer items until Master resolves their state;
-- continues local operation during a Master or WAN outage within documented
-  offline business rules.
+- polls and acknowledges durable commands;
+- continues local work during a Master or WAN outage under documented rules.
 
-Lite does not accept inbound WAN traffic, and Lite mode does not register or run
-direct Tally posting.
+Lite does not accept inbound WAN traffic and does not connect to Tally.
 
-### Public TLS edge
+### Tailscale transport
 
-The edge is an intentionally narrow Internet surface:
+Tailscale:
 
-- terminates publicly trusted TLS for the Node Sync hostname;
-- routes only `/api/v1/node`, `/api/v1/events`, and `/api/v1/commands*` to
-  Master;
-- rejects unsupported methods, paths, media types, and oversized bodies;
-- applies coarse IP controls and the approved request-rate policy;
-- writes redacted structured access logs;
-- forwards traffic through WireGuard to a fixed Master private address;
-- does not expose the administrative UI.
+- admits devices with individual or tagged device identities;
+- encrypts traffic between sites;
+- provides the private Master DNS name and HTTPS certificate;
+- applies grants such as Lite/operator to Master `tcp:443`;
+- relays encrypted traffic when direct connectivity is unavailable.
 
-Node identity and authorization remain application responsibilities; a network
-tunnel alone is not a franchise credential.
+Tailscale is not the business authorization layer. A device admitted as
+`tag:setuora-lite` must still present its own Setuora node API credential.
 
 ### Setuora Master
 
-Master is the control plane:
+Master:
 
 - authenticates franchise installations and durably receives events;
-- maintains the per-franchise sequence cursor;
-- atomically projects accepted events into franchise inventory and monitoring
-  read models in the v1 request;
+- maintains per-franchise sequence cursors and network stock projections;
 - coordinates transfer commands and item-level receipts;
-- exposes reports and operational status to authorized operators;
-- shows eligible mirrored batches in a central Tally queue and records posting
-  attempts;
-- records security, configuration, and administrative changes.
+- exposes consolidated reports to authenticated operators;
+- persists eligible Tally work and processes it outside upload requests;
+- records configuration and administrative changes.
 
-Master does not originate franchise operational transactions and does not
-directly open connections to Lite nodes.
+Master never initiates inbound connections to Lite nodes.
 
-### Database
+### Database and Tally
 
-The database is private and accepts connections only from Master. PostgreSQL plus
-formal migrations is required for production. SQLite may be used for the bounded
-single-process pilot defined in ADR-001, but it must not be used to justify a
-multi-process or production rollout.
+The database accepts connections only from Master. SQLite is restricted to the
+bounded single-process pilot; PostgreSQL and formal migrations remain a
+production gate.
 
-### Tally connector
+Tally remains inside the Master trust boundary. Port `9000` is never published
+by Compose or advertised through Tailscale. The Dockerized app reaches Tally
+through `host.docker.internal` on a Windows host or an approved private LAN
+address.
 
-The connector runs within the Master trust boundary. Tally port `9000` is bound
-to loopback where possible or restricted by host firewall to the Master service
-host. The connector consumes persisted pending batches; Node Sync requests never
-post to Tally inline. Per-franchise company mapping, durable multi-worker
-leasing, and reconciliation remain production gates.
+## Trust boundaries
 
-Inter-franchise transfers remain blocked from Tally until Stock Journal and
-source/destination Godown mappings have been validated against the real Tally
-companies.
+| Boundary               | Authentication                           | Encryption                  | Authorization                         |
+| ---------------------- | ---------------------------------------- | --------------------------- | ------------------------------------- |
+| Lite device to tailnet | Tailscale device identity/tag            | WireGuard                   | Grant to Master `tcp:443`             |
+| Lite request to Master | Per-installation Setuora credential      | Tailnet HTTPS               | Assigned franchise only               |
+| Operator to admin UI   | Tailscale user/device plus Setuora login | Tailnet HTTPS               | Setuora roles and permissions         |
+| Master to database     | Local service identity                   | Local/private transport     | Application process only              |
+| Master to Tally        | Host/LAN firewall                        | Private transport           | Configured company and access rules   |
+| Backup destination     | Operator/backup identity                 | Encrypted storage/transport | Restricted and audited restore access |
 
-## Trust Boundaries
+Device access and application access are independent. Revoking one does not
+automatically revoke the other; incident response rotates both when compromise
+is possible.
 
-| Boundary | Authentication | Encryption | Authorization |
-|---|---|---|---|
-| Lite to public edge | Per-installation credential | Public TLS | Installation may act only for its assigned franchise |
-| Edge to Master | WireGuard peer keys plus restricted private listener | WireGuard | Edge peer may reach only Master ingress |
-| Operator to admin UI | Operator VPN and application login | VPN plus HTTPS | Role/permission checks; MFA is a production gate |
-| Master to database | Service credential | Local/private TLS as supported | Dedicated least-privilege database role |
-| Master to Tally | Host firewall and Tally configuration | Private HTTP unless Tally supports stronger transport | Per-franchise/company mapping in Master |
-| Backup destination | Backup service identity | Encrypted backup artifact and secure transport | Restore access restricted and audited |
+## Network exposure
 
-No proxy-supplied client identity is trusted unless the request arrived from the
-fixed edge tunnel address. The edge must replace, not append blindly to,
-forwarded host/protocol/client headers.
+| Component              | Direction              |              Port | Source                  | Purpose                        |
+| ---------------------- | ---------------------- | ----------------: | ----------------------- | ------------------------------ |
+| Master Tailscale Serve | Tailnet inbound        |           TCP 443 | Approved Lite/operators | HTTPS API and authenticated UI |
+| Master host loopback   | Local only             |          TCP 8000 | Host health tooling     | Uvicorn health/troubleshooting |
+| Tally                  | Local/private only     |          TCP 9000 | Master application      | Tally XML gateway              |
+| Database               | Container/private only | database-specific | Master application      | Persistence                    |
+| Lite                   | Outbound               |       dynamic/443 | Lite host               | Tailscale and Node Sync        |
 
-## Network Exposure
+There is no public listener, port-forward, or Lite-to-Lite grant. Uvicorn,
+Tally, the database, backups, and Docker control endpoints never appear on the
+tailnet or Internet.
 
-Preferred public surface:
-
-| Host | Direction | Port | Source | Purpose |
-|---|---|---:|---|---|
-| Edge VPS | Inbound | TCP 443 | Internet | Node Sync HTTPS |
-| Edge VPS | Inbound | UDP 443 | Master/operator VPN peers | WireGuard on the same public port number |
-| Master premises | Inbound over WireGuard | TCP 8443 | Edge tunnel IP only | Private reverse-proxy ingress |
-| Master premises | Local only | TCP 8000 | Private ingress process | Uvicorn |
-| Master premises | Local/private only | TCP 9000 | Master Tally worker | Tally XML gateway |
-| Master premises | Local/private only | Database-specific | Master service role | PostgreSQL |
-| Lite premises | Outbound | TCP 443 | Lite service | Node Sync |
-
-If UDP 443 cannot be used in the operating environment, choose a reviewed
-outbound tunnel that runs over HTTPS. Do not solve that constraint by exposing
-Uvicorn, Tally, or the database.
-
-The supplied Caddy edge example disables HTTP/3/QUIC so WireGuard can own UDP
-443 while Caddy owns TCP 443 for HTTP/1.1 and HTTP/2. Validate that protocol
-split with the pinned Caddy build before rollout.
-
-Port 80 is not required to remain public. ACME must use TLS-ALPN-01 on 443 or an
-approved DNS challenge when the edge firewall permits only 443.
-
-## Primary Data Flows
+## Primary data flows
 
 ### Transaction upload
 
-1. A Lite user completes a local transaction.
-2. Lite commits the transaction, stock change, audit data, and outbox event
-   atomically.
-3. The uploader sends its oldest frozen event; the API also accepts up to 100
-   contiguous events in one request.
-4. Master validates node identity, franchise binding, schema, sequence, and
-   payload limits.
-5. Master commits the event journal, domain/read-model effects, command rows,
-   eligible `PENDING_SYNC` batch, and sequence cursor atomically, then returns
-   `200`.
-6. The existing Tally worker later posts eligible batches and records attempts,
-   after the rollout's company mapping is approved.
+1. Lite commits the transaction, stock change, audit data, and outbox event.
+2. The uploader sends its oldest frozen event over the private HTTPS URL.
+3. Tailscale grants the device a path to Master.
+4. Master authenticates the Setuora node credential and validates franchise,
+   schema, sequence, and payload limits.
+5. Master atomically commits the event, projections, commands, Tally queue work,
+   and franchise cursor, then returns `200`.
+6. The independent Master worker later processes eligible Tally work.
 
-An event acknowledgement proves the current Master projection committed. It
-does not prove Tally completion.
+An event acknowledgement proves the Master projection committed. It does not
+prove Tally completion.
 
 ### Command polling
 
 1. Lite calls `GET /api/v1/commands?limit=100`.
 2. Master returns the oldest unacknowledged commands at least once.
-3. Lite commits the local effect and command result before acknowledging.
-4. Lite sends `PATCH /api/v1/commands/<command_id>` with
-   `{"acknowledged":true}`.
+3. Lite commits the local effect and result.
+4. Lite acknowledges with `PATCH /api/v1/commands/<command_id>`.
 5. Master retains terminal command history for audit.
-
-The MVP has no command cursor or rejected/deferred acknowledgement status.
 
 ### Inter-franchise transfer
 
@@ -199,85 +161,36 @@ Source Lite        Master                         Destination Lite
     |<-- status on next poll/report ---------------------|
 ```
 
-Master never reports an item as destination stock merely because a receive
-command was sent. Ownership changes only after an accepted destination receipt.
+Ownership changes only after Master accepts the destination receipt.
 
-## Failure Behavior
+## Failure behavior
 
-| Failure | Required behavior |
-|---|---|
-| Lite loses Internet | Local transaction and outbox persist; upload resumes with backoff |
-| Master/edge unavailable | Lite remains local; no outbox rows are discarded |
-| Upload response is lost | Lite retries; Master returns the identical stored `ACCEPTED` acknowledgement without reapplying |
-| Event sequence has a gap | Master returns expected sequence; Lite stops later uploads and repairs order |
-| Same sequence has different content | Master returns `409`; no automatic overwrite, and Lite blocks later events |
-| Destination receives only some items | Transfer becomes `PARTIALLY_RECEIVED`; remaining items stay in transit/exception |
-| Tally unavailable | Accepted business events remain projected; Tally jobs retry independently |
-| Worker crashes after external Tally post | Stable remote ID and durable lease support safe reconciliation before retry |
-| Master database unavailable | Edge returns `503`; it must not acknowledge or buffer unaudited business events |
-| Credential revoked | Edge may connect, but Master returns `401`; Lite retains local data and blocks upload behind the failed event |
-| Clock skew | Timezone-less event timestamps fail validation; broader skew detection and alerting remain a gate |
+| Failure                                 | Required behavior                                                  |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| Lite loses Internet                     | Local transaction/outbox persist; upload resumes with backoff      |
+| Tailscale relay/direct path unavailable | Lite remains local; no outbox row is discarded                     |
+| Upload response is lost                 | Lite retries; Master returns the stored idempotent acknowledgement |
+| Event sequence has a gap                | Master returns expected sequence; Lite repairs order               |
+| Same sequence has different content     | Master returns `409`; no overwrite occurs                          |
+| Tally unavailable                       | Events remain projected; Tally work retries independently          |
+| Node credential revoked                 | Master rejects sync; Lite retains local data                       |
+| Tailscale device revoked                | Network connection fails before reaching Master                    |
+| Master database unavailable             | Master cannot acknowledge or buffer events                         |
 
-## Deployment Variants
+## Pilot limits and production gates
 
-### Preferred: edge VPS plus WireGuard
+The SQLite pilot remains limited to 50 nodes, fewer than 5 sustained events per
+second, one Master process, and one logical worker. Measure upload latency,
+backlogs, SQLite lock waits, franchise last-seen time, Tally queue age, transfer
+age, backup age, and disk use.
 
-Advantages:
+Tailscale replaces public-ingress infrastructure; it does not remove the gates
+for PostgreSQL, formal migrations, shared rate limiting, worker leasing,
+monitoring, recovery drills, key operations, or real-company Tally validation.
 
-- premises Master has no WAN port-forward;
-- public certificate and Internet logs are isolated from Tally;
-- the edge can be rebuilt without moving the Master database;
-- only a narrow private ingress is reachable over the tunnel.
+## References
 
-Costs:
-
-- one additional host and tunnel to monitor;
-- edge and Master deployments must coordinate proxy-header trust;
-- WireGuard key rotation and recovery need runbooks.
-
-### Weaker fallback: direct public 443 to Master Caddy
-
-This is allowed only when a static public address is available and a security
-review accepts the larger blast radius. Requirements include:
-
-- public DNS and ACME certificate; never `tls internal`;
-- NAT/firewall exposes only TCP 443 to Caddy;
-- Uvicorn remains on `127.0.0.1`;
-- admin routes are VPN-restricted separately from the Node Sync path;
-- Tally and database ports remain private;
-- host patching, endpoint protection, rate/body limits, access logging, and
-  external vulnerability checks pass before rollout.
-
-The direct variant does not remove application-level node authentication or any
-production gate.
-
-## Capacity and Revisit Points
-
-Pilot assumptions are no more than 50 nodes, less than 5 sustained events/second,
-one Master process, and one logical worker. Measure:
-
-- p50/p95/p99 durable event acknowledgement latency;
-- event and command backlog age/count;
-- database lock/transaction time;
-- event rejection and sequence-conflict rate;
-- per-franchise last authenticated request age;
-- Tally queue age, retry count, and acceptance rate;
-- transfer time in each state;
-- backup age, restore duration, disk use, and certificate expiry.
-
-Crossing an ADR-001 revisit trigger requires an architecture review before
-increasing capacity or adding replicas.
-
-## Production Readiness References
-
+- [Universal deployment](../deployment/universal-deployment.md)
+- [Remote franchise connectivity](../deployment/remote-franchise-connectivity.md)
 - [Node Sync v1 contract](../api/node-sync-v1.md)
-- [Master Internet edge guide](../deployment/master-internet-edge.md)
-- [Master edge Caddy example](../../deployment/caddy/Caddyfile.master.example)
-- [Lite node synchronization design](../../../Setuora-Lite/docs/architecture/lite-node-sync.md)
-- Current local HTTPS guide:
-  [`docs/deployment/https-lan-guide.md`](../deployment/https-lan-guide.md)
-- Current Windows service:
-  [`deployment/windows/install_service.ps1`](../../deployment/windows/install_service.ps1)
-
-The last two references document implemented LAN foundations. They are not an
-Internet rollout procedure.
+- [Tailscale policy example](../../deployment/tailscale/policy.hujson.example)

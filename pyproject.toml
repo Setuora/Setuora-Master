@@ -1,0 +1,36 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["data", ".venv"]
+
+[tool.ruff.lint]
+select = [
+  "B",
+  "C4",
+  "DTZ",
+  "E4",
+  "E7",
+  "E9",
+  "F",
+  "I",
+  "RUF",
+  "S",
+  "SIM",
+  "UP",
+]
+ignore = [
+  # These enums intentionally preserve Enum's string representation for
+  # existing database and API compatibility.
+  "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"app/routers/*.py" = ["B008"]
+"app/services/tally.py" = ["S310"]
+"app/services/tally_masters.py" = ["S310"]
+"tests/**/*.py" = ["S101", "S105", "S106", "S108", "S311", "S314"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

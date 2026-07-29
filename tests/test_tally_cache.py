@@ -41,8 +41,18 @@ def test_tally_cache_upserts_new_data_and_removes_stale_rows(db_session):
         period_start,
         period_end,
         [
-            TallySalesVoucher("2026-07-15", "42", "Sales", "Customer A", "500", remote_id="guid-42", tally_user="tally-a"),
-            TallySalesVoucher("2026-07-14", "41", "Sales", "Customer B", "250", remote_id="guid-41"),
+            TallySalesVoucher(
+                "2026-07-15",
+                "42",
+                "Sales",
+                "Customer A",
+                "500",
+                remote_id="guid-42",
+                tally_user="tally-a",
+            ),
+            TallySalesVoucher(
+                "2026-07-14", "41", "Sales", "Customer B", "250", remote_id="guid-41"
+            ),
         ],
     )
 
@@ -62,7 +72,15 @@ def test_tally_cache_upserts_new_data_and_removes_stale_rows(db_session):
         period_start,
         period_end,
         [
-            TallySalesVoucher("2026-07-15", "42", "Sales", "Customer A", "600", remote_id="guid-42", tally_user="tally-b"),
+            TallySalesVoucher(
+                "2026-07-15",
+                "42",
+                "Sales",
+                "Customer A",
+                "600",
+                remote_id="guid-42",
+                tally_user="tally-b",
+            ),
         ],
     )
 

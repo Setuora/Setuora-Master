@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
-from xml.etree import ElementTree as ET
+from xml.etree import ElementTree as ET  # nosec B405
 
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import fromstring as safe_fromstring
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -27,6 +29,7 @@ from app.services.settings import (
     is_tally_enabled,
     parse_sales_gst_ledger_mappings,
 )
+from app.services.tally_endpoint import build_tally_url, read_tally_response
 from app.services.voucher import calculate_voucher_summary
 
 TALLY_XML_SUPPORTED_BATCH_TYPES = {
@@ -46,7 +49,13 @@ DEFAULT_SALES_RETURN_VOUCHER_TYPE = "Credit Note"
 
 
 class TallySyncError(RuntimeError):
-    def __init__(self, message: str, retryable: bool = True, request_xml: str | None = None, response_xml: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        retryable: bool = True,
+        request_xml: str | None = None,
+        response_xml: str | None = None,
+    ):
         super().__init__(message)
         self.retryable = retryable
         self.request_xml = request_xml
@@ -61,13 +70,19 @@ class TallyResult:
 
 
 def missing_tally_settings(settings: dict[str, str]) -> list[str]:
-    return [label for key, label in REQUIRED_TALLY_SETTING_KEYS.items() if not settings.get(key, "").strip()]
+    return [
+        label
+        for key, label in REQUIRED_TALLY_SETTING_KEYS.items()
+        if not settings.get(key, "").strip()
+    ]
 
 
 def require_tally_settings(settings: dict[str, str]) -> None:
     missing = missing_tally_settings(settings)
     if missing:
-        raise TallySyncError(f"Complete Tally settings before generating XML: {', '.join(missing)}", retryable=False)
+        raise TallySyncError(
+            f"Complete Tally settings before generating XML: {', '.join(missing)}", retryable=False
+        )
     try:
         parse_sales_gst_ledger_mappings(settings.get("sales_gst_ledger_mappings"))
     except ValueError as exc:
@@ -78,14 +93,19 @@ def _voucher_type(settings: dict[str, str], batch_type: BatchType) -> str:
     if batch_type == BatchType.SALE:
         return settings.get("sales_voucher_type", "").strip() or DEFAULT_SALES_VOUCHER_TYPE
     if batch_type == BatchType.SALES_RETURN:
-        return settings.get("sales_return_voucher_type", "").strip() or DEFAULT_SALES_RETURN_VOUCHER_TYPE
+        return (
+            settings.get("sales_return_voucher_type", "").strip()
+            or DEFAULT_SALES_RETURN_VOUCHER_TYPE
+        )
     return settings.get("purchase_voucher_type", "").strip() or DEFAULT_PURCHASE_VOUCHER_TYPE
 
 
 def _required_value(settings: dict[str, str], key: str, label: str) -> str:
     value = settings.get(key, "").strip()
     if not value:
-        raise TallySyncError(f"Complete Tally settings before generating XML: {label}", retryable=False)
+        raise TallySyncError(
+            f"Complete Tally settings before generating XML: {label}", retryable=False
+        )
     return value
 
 
@@ -94,7 +114,11 @@ def _require_sales_gst_mappings_for_batch(
     lines,
 ) -> None:
     missing_rates = sorted(
-        {gst_rate_key(line.gst_rate) for line in lines if gst_rate_key(line.gst_rate) not in sales_gst_mappings},
+        {
+            gst_rate_key(line.gst_rate)
+            for line in lines
+            if gst_rate_key(line.gst_rate) not in sales_gst_mappings
+        },
         key=lambda value: Decimal(value),
     )
     if missing_rates:
@@ -141,9 +165,9 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _voucher_date(batch: Batch) -> str:
-    moment = batch.submitted_at or batch.created_at or datetime.now(timezone.utc)
+    moment = batch.submitted_at or batch.created_at or datetime.now(UTC)
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
+        moment = moment.replace(tzinfo=UTC)
     return moment.astimezone(_IST).strftime("%Y%m%d")
 
 
@@ -269,16 +293,22 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
         for key, totals in tax_by_rate.items():
             ledgers = sales_ledgers(Decimal(key))
             if totals["cgst"] > 0:
-                add_ledger(voucher, "LEDGERENTRIES.LIST", ledgers["cgst"], totals["cgst"], credit=is_sale)
+                add_ledger(
+                    voucher, "LEDGERENTRIES.LIST", ledgers["cgst"], totals["cgst"], credit=is_sale
+                )
             if totals["sgst"] > 0:
-                add_ledger(voucher, "LEDGERENTRIES.LIST", ledgers["sgst"], totals["sgst"], credit=is_sale)
+                add_ledger(
+                    voucher, "LEDGERENTRIES.LIST", ledgers["sgst"], totals["sgst"], credit=is_sale
+                )
             if totals["igst"] > 0:
                 if not ledgers["igst"]:
                     raise TallySyncError(
                         f"Add an IGST ledger for the {key}% product GST mapping.",
                         retryable=False,
                     )
-                add_ledger(voucher, "LEDGERENTRIES.LIST", ledgers["igst"], totals["igst"], credit=is_sale)
+                add_ledger(
+                    voucher, "LEDGERENTRIES.LIST", ledgers["igst"], totals["igst"], credit=is_sale
+                )
     else:
         if summary.cgst_amount > 0:
             add_ledger(
@@ -311,29 +341,46 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
 
 
 def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
-    host = settings.get("tally_host")
-    port = settings.get("tally_port")
-    if not host or not port:
-        raise TallySyncError("Tally host/port is not configured", retryable=True, request_xml=xml)
-    url = f"http://{host}:{port}"
-    request = Request(url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST")
     try:
-        with urlopen(request, timeout=5) as response:
-            response_xml = response.read().decode("utf-8", errors="replace")
+        url = build_tally_url(settings)
+    except ValueError as exc:
+        raise TallySyncError(str(exc), retryable=False, request_xml=xml) from exc
+    request = Request(
+        url, data=xml.encode("utf-8"), headers={"Content-Type": "text/xml"}, method="POST"
+    )
+    try:
+        # build_tally_url fixes the scheme and rejects URL syntax in the host.
+        with urlopen(request, timeout=5) as response:  # nosec B310
+            response_xml = read_tally_response(response)
     except (URLError, OSError) as exc:
         raise TallySyncError("Tally connection failed", retryable=True, request_xml=xml) from exc
+    except ValueError as exc:
+        raise TallySyncError(str(exc), retryable=False, request_xml=xml) from exc
 
     try:
-        root = ET.fromstring(response_xml)
-    except ET.ParseError as exc:
-        raise TallySyncError("Tally returned unreadable XML", retryable=False, request_xml=xml, response_xml=response_xml) from exc
+        root = safe_fromstring(response_xml)
+    except (ET.ParseError, DefusedXmlException) as exc:
+        raise TallySyncError(
+            "Tally returned unreadable XML",
+            retryable=False,
+            request_xml=xml,
+            response_xml=response_xml,
+        ) from exc
 
-    errors = [node.text for node in root.iter() if node.tag.upper().endswith("LINEERROR") and node.text]
+    errors = [
+        node.text for node in root.iter() if node.tag.upper().endswith("LINEERROR") and node.text
+    ]
     if errors:
-        raise TallySyncError("; ".join(errors), retryable=False, request_xml=xml, response_xml=response_xml)
+        raise TallySyncError(
+            "; ".join(errors), retryable=False, request_xml=xml, response_xml=response_xml
+        )
 
-    created = next((node.text for node in root.iter() if node.tag.upper().endswith("CREATED")), None)
-    altered = next((node.text for node in root.iter() if node.tag.upper().endswith("ALTERED")), None)
+    created = next(
+        (node.text for node in root.iter() if node.tag.upper().endswith("CREATED")), None
+    )
+    altered = next(
+        (node.text for node in root.iter() if node.tag.upper().endswith("ALTERED")), None
+    )
 
     def _as_int(value: str | None) -> int:
         try:
@@ -342,7 +389,9 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
             return 0
 
     # A 200 response can still mean Tally imported nothing.
-    exceptions = next((node.text for node in root.iter() if node.tag.upper().endswith("EXCEPTIONS")), None)
+    exceptions = next(
+        (node.text for node in root.iter() if node.tag.upper().endswith("EXCEPTIONS")), None
+    )
     if _as_int(created) + _as_int(altered) < 1:
         detail = f"Tally created/altered nothing (CREATED={created or 0}, ALTERED={altered or 0}"
         detail += f", EXCEPTIONS={exceptions})" if exceptions is not None else ")"
@@ -371,7 +420,7 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     stale_before = now - timedelta(minutes=SYNC_LEASE_MINUTES)
     sync_started_at = batch.sync_started_at
     if sync_started_at is not None and sync_started_at.tzinfo is None:
-        sync_started_at = sync_started_at.replace(tzinfo=timezone.utc)
+        sync_started_at = sync_started_at.replace(tzinfo=UTC)
     if (
         batch.status == BatchStatus.SYNCING.value
         and sync_started_at is not None
@@ -396,7 +445,11 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     if batch.batch_type not in TALLY_XML_SUPPORTED_BATCH_TYPES:
         batch.status = BatchStatus.PENDING_SYNC.value
         batch.last_error = f"Tally XML is not configured for {batch.batch_type}"
-        db.add(SyncAttempt(batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, error=batch.last_error))
+        db.add(
+            SyncAttempt(
+                batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, error=batch.last_error
+            )
+        )
         db.commit()
         return
     batch.sync_remote_id = tally_remote_id(batch, settings)
@@ -405,14 +458,25 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     except TallySyncError as exc:
         batch.status = BatchStatus.PENDING_SYNC.value
         batch.last_error = str(exc)
-        db.add(SyncAttempt(batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, error=batch.last_error))
+        db.add(
+            SyncAttempt(
+                batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, error=batch.last_error
+            )
+        )
         db.commit()
         return
     if not is_tally_enabled(db):
         batch.status = BatchStatus.PENDING_SYNC.value
         batch.sync_request_xml = xml
         batch.last_error = "Tally sync is disabled in settings"
-        db.add(SyncAttempt(batch_id=batch.id, status=BatchStatus.PENDING_SYNC.value, request_xml=xml, error=batch.last_error))
+        db.add(
+            SyncAttempt(
+                batch_id=batch.id,
+                status=BatchStatus.PENDING_SYNC.value,
+                request_xml=xml,
+                error=batch.last_error,
+            )
+        )
         db.commit()
         return
 
@@ -424,8 +488,7 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
         else:
             claim_query = claim_query.where(Batch.sync_started_at == batch.sync_started_at)
     claim = db.execute(
-        claim_query
-        .values(
+        claim_query.values(
             status=BatchStatus.SYNCING.value,
             sync_remote_id=batch.sync_remote_id,
             sync_request_xml=xml,
@@ -433,8 +496,7 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
             retry_count=batch.retry_count,
             last_retry_at=batch.last_retry_at,
             last_error=None,
-        )
-        .execution_options(synchronize_session=False)
+        ).execution_options(synchronize_session=False)
     ).rowcount
     if claim != 1:
         db.rollback()

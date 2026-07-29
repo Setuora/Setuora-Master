@@ -1,13 +1,16 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Annotated
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import get_settings
-from app.database import Base, SessionLocal, engine
+from app.database import Base, SessionLocal, engine, get_db
 from app.middleware import (
     CSRFOriginMiddleware,
     NodeAPIBodyLimitMiddleware,
@@ -82,7 +85,8 @@ def create_app(app_mode: str | None = None) -> FastAPI:
         return FileResponse("app/static/favicon.svg", media_type="image/svg+xml")
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    def health(db: Annotated[Session, Depends(get_db)]) -> dict[str, str]:
+        db.execute(text("SELECT 1"))
         return {"status": "ok", "role": selected_mode}
 
     return app

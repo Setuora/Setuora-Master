@@ -1,0 +1,13 @@
+.agents/
+.codex/
+.git/
+.venv/
+data/
+node_modules/
+app/templates/
+deployment/tailscale/policy.hujson.example
+.dockerignore
+.env
+.env.example
+.gitignore
+requirements*.lock

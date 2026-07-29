@@ -10,10 +10,10 @@ Master is not a franchise transaction-entry application. Operational capture,
 label handling, and local inventory work remain in Setuora Lite.
 
 > **Rollout status:** the Master application and Node Sync v1 are implemented for
-> a controlled pilot. The public edge, PostgreSQL migration, franchise-aware
-> Tally mapping, disaster-recovery drills, metrics, and multi-node acceptance
-> testing remain production gates. Do not expose Uvicorn, Tally, the database,
-> or the administrative UI directly to the Internet.
+> a controlled pilot. The universal deployment uses a private Tailscale network;
+> PostgreSQL migration, franchise-aware Tally mapping, disaster-recovery drills,
+> metrics, and multi-node acceptance testing remain production gates. Do not
+> expose Uvicorn, Tally, or the database directly to the public Internet.
 
 ## Implemented Master capabilities
 
@@ -34,24 +34,24 @@ maintenance, and Node Sync routes. Public API documentation is disabled.
 - [Master/Lite architecture decision](docs/architecture/adr-001-master-lite-control-plane.md)
 - [Master/Lite topology](docs/architecture/master-lite-topology.md)
 - [Node Sync API v1](docs/api/node-sync-v1.md)
-- [Internet-edge deployment](docs/deployment/master-internet-edge.md)
-- [Public-edge Caddy example](deployment/caddy/Caddyfile.master.example)
+- [Universal Linux/Windows deployment](docs/deployment/universal-deployment.md)
+- [Remote franchise connectivity](docs/deployment/remote-franchise-connectivity.md)
 
 Lite always initiates the connection:
 
 ```text
 Setuora Lite
-  -> outbound HTTPS 443
-  -> public TLS edge
-  -> WireGuard
-  -> private Master ingress
-  -> Uvicorn on 127.0.0.1:8000
+  -> outbound Tailscale/WireGuard connection
+  -> private tailnet HTTPS 443
+  -> Tailscale Serve
+  -> Uvicorn in the private container network
   -> private database and Tally gateway
 ```
 
-Only the exact Node Sync API paths belong on the public hostname. Master login,
-reports, maintenance, static files, OpenAPI, the database, and Tally must remain
-private.
+There is no public listener, public DNS requirement, router port-forward, or
+Caddy dependency. Tailscale grants determine which devices can reach Master;
+Setuora node credentials independently bind every sync request to one franchise.
+Tally and the database remain private.
 
 ## Pilot limits
 
@@ -67,12 +67,17 @@ clean-host recovery testing are required before a production Internet rollout.
 
 ## Requirements
 
-- Python 3.11;
-- the hash-verified packages in `requirements.lock`;
-- a writable `data/` directory;
-- Tally Prime on the Master machine or a private LAN endpoint;
-- a long application secret and a unique first-admin password;
-- Windows administrator access when using the supplied service installer.
+For the recommended deployment on either Linux or Windows:
+
+- Docker Engine with Compose v2, or Docker Desktop;
+- a Tailscale account with HTTPS and MagicDNS enabled;
+- one-off, non-ephemeral, pre-authorized auth key tagged
+  `tag:setuora-master`;
+- Tally Prime on the Docker host or a private LAN endpoint;
+- a unique first-administrator password.
+
+Python 3.11 is needed only for local development and for the optional
+cross-platform `deploy.py` helper.
 
 Tally port `9000` must never be reachable from the public Internet.
 
@@ -122,32 +127,43 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 Open `http://127.0.0.1:8000`. The health endpoint should return:
 
 ```json
-{"status":"ok","role":"master"}
+{ "status": "ok", "role": "master" }
 ```
 
 Bootstrap credentials create only the first account in a new database. Changing
 the environment values later does not change an existing user's password.
 
-## Windows setup and lifecycle
+## Universal self-hosted deployment
 
-`Setuora.exe` is the Windows setup and control utility:
+The same deployment is used on Linux and Windows. It runs Setuora and Tailscale
+as Compose services, uses persistent Docker volumes, and publishes port `8000`
+only on host loopback for health checks.
 
-```text
-Setuora.exe setup --install-dir C:\Setuora-Master
-Setuora.exe repair
-Setuora.exe update
-Setuora.exe start
-Setuora.exe stop
+```bash
+python deploy.py setup
 ```
 
-Setup installs the pinned dependencies, writes a Master environment file,
-configures the optional private-LAN HTTPS proxy, and can install the Windows
-services. It does not deploy the public edge, WireGuard, PostgreSQL, an
-administrative VPN, or production monitoring.
+The helper securely prompts for the first administrator password and the
+tagged Tailscale auth key, builds the application, waits for health, and prints
+the private HTTPS URL. Lifecycle commands are also identical:
 
-The updater refuses uncommitted source changes and preserves runtime data,
-settings, and backups. See the [installation guide](docs/deployment/installation-guide.md)
-and [Windows service guide](docs/deployment/windows-service.md).
+```bash
+python deploy.py start
+python deploy.py status
+python deploy.py logs
+python deploy.py update
+python deploy.py stop
+```
+
+If Python is unavailable on the host, fill `.env` from `.env.example` and use
+`docker compose up -d --build`; query the URL with
+`docker compose exec tailscale tailscale status`.
+
+Copy [`deployment/tailscale/policy.hujson.example`](deployment/tailscale/policy.hujson.example)
+into the Tailscale access-control editor after replacing the operator address.
+Install Tailscale on every Lite host, tag it `tag:setuora-lite`, and configure
+its `MASTER_URL` with the HTTPS URL printed by setup. See the
+[universal deployment guide](docs/deployment/universal-deployment.md).
 
 ## First administration
 
@@ -197,22 +213,24 @@ The pilot creates verified SQLite backups on a schedule and supports a protected
 backup download. Keep encrypted copies off the Master machine and protect the
 environment file separately.
 
-Recovery is an offline operator procedure. Close the public edge, recover a
-matched application/database backup, reconcile every node cursor, verify network
-ownership, and reopen uploads only after an audited acceptance check.
+Recovery is an offline operator procedure. Revoke or stop tailnet access,
+recover a matched application/database backup, reconcile every node cursor,
+verify network ownership, and reopen uploads only after an audited acceptance
+check.
 
 See the [backup and recovery guide](docs/deployment/backup-restore-guide.md).
 
-## Internet deployment
+## Remote franchise connectivity
 
-The supported target is a public TLS edge connected to a private Master ingress
-over WireGuard. The administrative site is reachable only through an
-authenticated private network.
+Tailscale Serve terminates HTTPS inside the private tailnet. Master and every
+Lite node make outbound connections, so different ISPs, carrier NAT, dynamic
+addresses, and separate franchise networks do not require inbound firewall
+rules. This is deliberately Tailscale **Serve**, not Funnel: unauthenticated
+public Internet clients cannot reach Setuora.
 
-The included edge Caddyfile is a reviewed starting point, not a turnkey
-deployment. Replace every placeholder, pin and validate the proxy version, add
-shared rate limiting, and pass every acceptance test in the
-[Internet-edge guide](docs/deployment/master-internet-edge.md).
+Network admission is not a franchise identity. Each Lite installation must also
+use the one-time Setuora node credential issued from Master's Franchises page.
+See the [remote-connectivity guide](docs/deployment/remote-franchise-connectivity.md).
 
 ## Validation
 
@@ -221,40 +239,31 @@ Run:
 ```bash
 python -m pytest -q
 python -m compileall -q app
+docker compose config --quiet
 ```
-
-For Windows pilot validation:
-
-```powershell
-.\deployment\windows\production_preflight.ps1 `
-  -ProjectDir "C:\Setuora-Master" `
-  -Address "master-admin.internal"
-```
-
-The Windows preflight validates only the private single-process pilot. It is not
-approval for public exposure.
 
 ## Deployment guides
 
+- [Universal Linux/Windows deployment](docs/deployment/universal-deployment.md)
 - [Installation](docs/deployment/installation-guide.md)
-- [Private administrative HTTPS](docs/deployment/https-lan-guide.md)
-- [Windows service](docs/deployment/windows-service.md)
 - [Pilot release checklist](docs/deployment/production-release-checklist.md)
 - [Backup and recovery](docs/deployment/backup-restore-guide.md)
 - [Tally integration](docs/deployment/tally-integration-guide.md)
-- [Internet edge](docs/deployment/master-internet-edge.md)
+- [Remote franchise connectivity](docs/deployment/remote-franchise-connectivity.md)
 
 ## Troubleshooting
 
 If login fails, confirm that the application is using the expected database. A
 bootstrap password does not overwrite an existing account.
 
-If a franchise is offline, verify its system clock, public DNS, outbound TCP
-443, API key, TLS trust, and the last acknowledged sequence shown in Master.
+If a franchise is offline, verify its system clock, Tailscale status and grants,
+the private `*.ts.net` URL, its Setuora node API key, and the last acknowledged
+sequence shown in Master.
 
 If Tally work remains queued, verify that Tally is open on the private gateway,
 the selected company is correct, required masters are confirmed, and posting is
 enabled only for an accepted test company.
 
-If startup fails, check `.env`, Python 3.11, the dependency lock, directory
-permissions, port `8000`, and the service error log.
+If startup fails, run `python deploy.py status` and `python deploy.py logs`.
+Check Docker, the tagged Tailscale auth key, HTTPS/MagicDNS enablement, `.env`,
+the dependency lock, and free disk space.

@@ -63,7 +63,15 @@ def validate_settings(requested: dict[str, str]) -> str | None:
     return None
 
 
-def render_settings(request: Request, db: Session, *, settings: dict | None = None, error: str | None = None, status_code: int = 200, open_settings: bool = False):
+def render_settings(
+    request: Request,
+    db: Session,
+    *,
+    settings: dict | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+    open_settings: bool = False,
+):
     return templates.TemplateResponse(
         request,
         "settings.html",
@@ -151,12 +159,24 @@ def save_settings(
         "tally_enabled": "true" if tally_enabled == "true" else "false",
         "tally_host": tally_host.strip(),
         "tally_port": tally_port.strip(),
-        "sales_voucher_type": current_settings["sales_voucher_type"] if sales_voucher_type is None else sales_voucher_type.strip(),
-        "purchase_voucher_type": current_settings["purchase_voucher_type"] if purchase_voucher_type is None else purchase_voucher_type.strip(),
-        "sales_ledger_name": current_settings["sales_ledger_name"] if sales_ledger_name is None else sales_ledger_name.strip(),
-        "purchase_ledger_name": current_settings["purchase_ledger_name"] if purchase_ledger_name is None else purchase_ledger_name.strip(),
-        "cgst_ledger_name": current_settings["cgst_ledger_name"] if cgst_ledger_name is None else cgst_ledger_name.strip(),
-        "sgst_ledger_name": current_settings["sgst_ledger_name"] if sgst_ledger_name is None else sgst_ledger_name.strip(),
+        "sales_voucher_type": current_settings["sales_voucher_type"]
+        if sales_voucher_type is None
+        else sales_voucher_type.strip(),
+        "purchase_voucher_type": current_settings["purchase_voucher_type"]
+        if purchase_voucher_type is None
+        else purchase_voucher_type.strip(),
+        "sales_ledger_name": current_settings["sales_ledger_name"]
+        if sales_ledger_name is None
+        else sales_ledger_name.strip(),
+        "purchase_ledger_name": current_settings["purchase_ledger_name"]
+        if purchase_ledger_name is None
+        else purchase_ledger_name.strip(),
+        "cgst_ledger_name": current_settings["cgst_ledger_name"]
+        if cgst_ledger_name is None
+        else cgst_ledger_name.strip(),
+        "sgst_ledger_name": current_settings["sgst_ledger_name"]
+        if sgst_ledger_name is None
+        else sgst_ledger_name.strip(),
         "sales_gst_ledger_mappings": sales_gst_ledger_mappings.strip(),
         "round_off_ledger_name": round_off_ledger_name.strip(),
         "retry_interval_seconds": retry_interval_seconds.strip(),
@@ -166,7 +186,14 @@ def save_settings(
     if validation_error:
         settings = {**current_settings, **requested}
         settings["tally_enabled"] = current_settings.get("tally_enabled", "false")
-        return render_settings(request, db, settings=settings, error=validation_error, status_code=400, open_settings=True)
+        return render_settings(
+            request,
+            db,
+            settings=settings,
+            error=validation_error,
+            status_code=400,
+            open_settings=True,
+        )
 
     if requested["tally_enabled"] == "true":
         try:
@@ -231,12 +258,24 @@ def autosave_settings(
         "company_name": company_name.strip(),
         "tally_host": tally_host.strip(),
         "tally_port": tally_port.strip(),
-        "sales_voucher_type": before_settings["sales_voucher_type"] if sales_voucher_type is None else sales_voucher_type.strip(),
-        "purchase_voucher_type": before_settings["purchase_voucher_type"] if purchase_voucher_type is None else purchase_voucher_type.strip(),
-        "sales_ledger_name": before_settings["sales_ledger_name"] if sales_ledger_name is None else sales_ledger_name.strip(),
-        "purchase_ledger_name": before_settings["purchase_ledger_name"] if purchase_ledger_name is None else purchase_ledger_name.strip(),
-        "cgst_ledger_name": before_settings["cgst_ledger_name"] if cgst_ledger_name is None else cgst_ledger_name.strip(),
-        "sgst_ledger_name": before_settings["sgst_ledger_name"] if sgst_ledger_name is None else sgst_ledger_name.strip(),
+        "sales_voucher_type": before_settings["sales_voucher_type"]
+        if sales_voucher_type is None
+        else sales_voucher_type.strip(),
+        "purchase_voucher_type": before_settings["purchase_voucher_type"]
+        if purchase_voucher_type is None
+        else purchase_voucher_type.strip(),
+        "sales_ledger_name": before_settings["sales_ledger_name"]
+        if sales_ledger_name is None
+        else sales_ledger_name.strip(),
+        "purchase_ledger_name": before_settings["purchase_ledger_name"]
+        if purchase_ledger_name is None
+        else purchase_ledger_name.strip(),
+        "cgst_ledger_name": before_settings["cgst_ledger_name"]
+        if cgst_ledger_name is None
+        else cgst_ledger_name.strip(),
+        "sgst_ledger_name": before_settings["sgst_ledger_name"]
+        if sgst_ledger_name is None
+        else sgst_ledger_name.strip(),
         "sales_gst_ledger_mappings": sales_gst_ledger_mappings.strip(),
         "round_off_ledger_name": round_off_ledger_name.strip(),
         "retry_interval_seconds": retry_interval_seconds.strip(),

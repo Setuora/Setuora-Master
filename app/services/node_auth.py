@@ -5,7 +5,7 @@ import hmac
 import secrets
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 
 from sqlalchemy import select
@@ -47,8 +47,8 @@ def hash_node_secret(secret: str) -> str:
 
 def _aware(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def ensure_node_service_user(db: Session, node: FranchiseNode) -> User:
@@ -62,7 +62,7 @@ def ensure_node_service_user(db: Session, node: FranchiseNode) -> User:
     counter = 1
     while db.scalar(select(User.id).where(User.username == username)) is not None:
         counter += 1
-        username = f"{stem[:70 - len(str(counter))]}{counter}"
+        username = f"{stem[: 70 - len(str(counter))]}{counter}"
 
     # This inactive account exists only to attribute mirrored inventory rows.
     # It cannot log in, and its randomly generated password is discarded.
@@ -163,6 +163,7 @@ def rotate_node_credential(
         db.refresh(provisioned.credential)
     return provisioned
 
+
 def parse_api_key(value: str) -> tuple[str, str] | None:
     parts = value.split(".", 2)
     if len(parts) != 3 or parts[0] != API_KEY_PREFIX:
@@ -214,9 +215,7 @@ def authenticate_bearer(
         raise NodeAuthError(401, "INVALID_CREDENTIAL", "The node API key is invalid.")
 
     key_id, secret = parsed
-    credential = db.scalar(
-        select(NodeCredential).where(NodeCredential.key_id == key_id)
-    )
+    credential = db.scalar(select(NodeCredential).where(NodeCredential.key_id == key_id))
     supplied_hash = hash_node_secret(secret)
     expected_hash = credential.secret_hash if credential is not None else _DUMMY_SECRET_HASH
     valid_secret = hmac.compare_digest(expected_hash, supplied_hash)

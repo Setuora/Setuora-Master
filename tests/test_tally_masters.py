@@ -40,8 +40,7 @@ def test_collect_master_requirements_includes_products_and_settings(db_session):
         {
             **VALID_SETTINGS,
             "sales_gst_ledger_mappings": (
-                "5 | Sales @ 5% | Output CGST @ 2.5% | "
-                "Output SGST @ 2.5% | Output IGST @ 5%"
+                "5 | Sales @ 5% | Output CGST @ 2.5% | Output SGST @ 2.5% | Output IGST @ 5%"
             ),
         },
     )
@@ -145,8 +144,9 @@ class _GatewayResponse:
     def __exit__(self, *args):
         return None
 
-    def read(self):
-        return self.body.encode()
+    def read(self, size=-1):
+        body = self.body.encode()
+        return body if size < 0 else body[:size]
 
 
 def test_live_tally_data_parses_companies_ledgers_and_sales_vouchers():
@@ -236,7 +236,9 @@ def test_gateway_check_rejects_tally_line_error():
         result = check_tally_gateway({"tally_host": "127.0.0.1", "tally_port": "9000"})
 
     assert not result.ok
-    assert result.message == "Tally rejected gateway check: Could not find Report 'List of Companies'!"
+    assert (
+        result.message == "Tally rejected gateway check: Could not find Report 'List of Companies'!"
+    )
 
 
 def test_gateway_check_accepts_successful_tally_xml():

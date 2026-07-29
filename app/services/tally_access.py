@@ -46,17 +46,13 @@ def scoped_companies(db: Session, user: User) -> list[Company]:
     query = select(Company).order_by(Company.name)
     company_assignments = _assignments(db, user, COMPANY_RESOURCE)
     if company_assignments:
-        query = query.where(
-            Company.id.in_(tuple(row.company_id for row in company_assignments))
-        )
+        query = query.where(Company.id.in_(tuple(row.company_id for row in company_assignments)))
     return list(db.scalars(query))
 
 
 def can_access_company(db: Session, user: User, company_id: int) -> bool:
     company_assignments = _assignments(db, user, COMPANY_RESOURCE)
-    return not company_assignments or company_id in {
-        row.company_id for row in company_assignments
-    }
+    return not company_assignments or company_id in {row.company_id for row in company_assignments}
 
 
 def can_access_tally_company(
@@ -102,11 +98,7 @@ def filter_ledgers(
     ledger_assignments = _assignments(db, user, LEDGER_RESOURCE)
     if not ledger_assignments:
         return list(ledgers)
-    allowed = {
-        row.resource_key
-        for row in ledger_assignments
-        if row.company_id == company_id
-    }
+    allowed = {row.resource_key for row in ledger_assignments if row.company_id == company_id}
     return [ledger for ledger in ledgers if resource_key(ledger.name) in allowed]
 
 
@@ -120,27 +112,19 @@ def filter_sales_vouchers(
     ledger_assignments = _assignments(db, user, LEDGER_RESOURCE)
     if ledger_assignments:
         allowed_ledgers = {
-            row.resource_key
-            for row in ledger_assignments
-            if row.company_id == company_id
+            row.resource_key for row in ledger_assignments if row.company_id == company_id
         }
         visible = [
-            voucher
-            for voucher in visible
-            if resource_key(voucher.party_ledger) in allowed_ledgers
+            voucher for voucher in visible if resource_key(voucher.party_ledger) in allowed_ledgers
         ]
 
     tally_user_assignments = _assignments(db, user, TALLY_USER_RESOURCE)
     if tally_user_assignments:
         allowed_users = {
-            row.resource_key
-            for row in tally_user_assignments
-            if row.company_id == company_id
+            row.resource_key for row in tally_user_assignments if row.company_id == company_id
         }
         visible = [
-            voucher
-            for voucher in visible
-            if resource_key(voucher.tally_user) in allowed_users
+            voucher for voucher in visible if resource_key(voucher.tally_user) in allowed_users
         ]
     return visible
 
@@ -159,16 +143,16 @@ def replace_user_access(
 
     valid_companies = {
         company.id: company
-        for company in db.scalars(
-            select(Company).where(Company.id.in_(tuple(set(company_ids))))
-        )
+        for company in db.scalars(select(Company).where(Company.id.in_(tuple(set(company_ids)))))
     }
     selected_ledger_ids = tuple(set(ledger_ids))
-    ledger_rows = list(
-        db.scalars(
-            select(TallyLedgerCache).where(TallyLedgerCache.id.in_(selected_ledger_ids))
+    ledger_rows = (
+        list(
+            db.scalars(select(TallyLedgerCache).where(TallyLedgerCache.id.in_(selected_ledger_ids)))
         )
-    ) if selected_ledger_ids else []
+        if selected_ledger_ids
+        else []
+    )
 
     user_rows: list[tuple[int, str]] = []
     for raw in tally_user_values:
@@ -182,9 +166,7 @@ def replace_user_access(
         if db.get(Company, company_id) is not None:
             user_rows.append((company_id, username.strip()))
 
-    db.execute(
-        delete(UserTallyAccess).where(UserTallyAccess.user_id == user.id)
-    )
+    db.execute(delete(UserTallyAccess).where(UserTallyAccess.user_id == user.id))
 
     for company in valid_companies.values():
         db.add(
@@ -272,9 +254,7 @@ def access_page_data(db: Session, users: Iterable[User]) -> dict[str, object]:
     for user in users:
         assignments = rows_by_user.get(user.id, [])
         counts = {
-            resource_type: sum(
-                row.resource_type == resource_type for row in assignments
-            )
+            resource_type: sum(row.resource_type == resource_type for row in assignments)
             for resource_type in (
                 COMPANY_RESOURCE,
                 LEDGER_RESOURCE,
@@ -289,8 +269,7 @@ def access_page_data(db: Session, users: Iterable[User]) -> dict[str, object]:
             )
         if counts[LEDGER_RESOURCE]:
             labels.append(
-                f"{counts[LEDGER_RESOURCE]} ledger"
-                f"{'s' if counts[LEDGER_RESOURCE] != 1 else ''}"
+                f"{counts[LEDGER_RESOURCE]} ledger{'s' if counts[LEDGER_RESOURCE] != 1 else ''}"
             )
         if counts[TALLY_USER_RESOURCE]:
             labels.append(
@@ -304,9 +283,7 @@ def access_page_data(db: Session, users: Iterable[User]) -> dict[str, object]:
         user_access[user.id] = {
             "summary": summary,
             "company_ids": [
-                row.company_id
-                for row in assignments
-                if row.resource_type == COMPANY_RESOURCE
+                row.company_id for row in assignments if row.resource_type == COMPANY_RESOURCE
             ],
             "ledger_keys": [
                 access_key(row.company_id, row.resource_key)

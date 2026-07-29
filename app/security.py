@@ -5,11 +5,11 @@ import hashlib
 import hmac
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.config import get_settings
 
-MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_LENGTH = 12
 
 
 def _b64(data: bytes) -> str:
@@ -42,7 +42,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_session_token(user_id: int) -> str:
     settings = get_settings()
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.session_timeout_minutes)
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.session_timeout_minutes)
     payload = {"sub": user_id, "exp": int(expires_at.timestamp())}
     body = _b64(json.dumps(payload, separators=(",", ":")).encode())
     signature = _b64(hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest())
@@ -66,6 +66,6 @@ def read_session_token(token: str | None) -> int | None:
         user_id = int(payload["sub"])
     except (KeyError, TypeError, ValueError):
         return None
-    if expires_at < int(datetime.now(timezone.utc).timestamp()):
+    if expires_at < int(datetime.now(UTC).timestamp()):
         return None
     return user_id

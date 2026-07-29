@@ -47,11 +47,7 @@ def test_role_access_catalog_contains_only_master_roles_and_capabilities():
         "Master administration",
         "Backup access",
     ]
-    assert [
-        row.key
-        for section in sections
-        for row in section.rows
-    ] == [
+    assert [row.key for section in sections for row in section.rows] == [
         "settings_edit",
         "tally_check_edit",
         "users_manage",
@@ -59,11 +55,7 @@ def test_role_access_catalog_contains_only_master_roles_and_capabilities():
         "backup_data",
         "backup_download",
     ]
-    assert all(
-        len(row.cells) == len(ROLE_COLUMNS)
-        for section in sections
-        for row in section.rows
-    )
+    assert all(len(row.cells) == len(ROLE_COLUMNS) for section in sections for row in section.rows)
 
 
 def test_master_role_defaults_and_multi_role_union():

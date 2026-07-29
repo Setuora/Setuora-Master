@@ -1,8 +1,6 @@
 (function () {
   function initPasswordField(field) {
-    const input = field.querySelector(
-      "input[type='password'], input[type='text']",
-    );
+    const input = field.querySelector("input[type='password'], input[type='text']");
     const button = field.querySelector("[data-password-toggle]");
     if (!input || !button) return;
 

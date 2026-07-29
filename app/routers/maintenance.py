@@ -31,9 +31,7 @@ def maintenance_page(
 ):
     user = require_permission(request, db, "backup_data")
     error_message = {
-        "backup_failed": (
-            "Backup could not be created. Check the database file and try again."
-        ),
+        "backup_failed": ("Backup could not be created. Check the database file and try again."),
     }.get(error, error)
     success_message = {
         "backup_settings": "Backup settings saved.",

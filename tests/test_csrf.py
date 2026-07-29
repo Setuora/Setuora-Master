@@ -8,7 +8,9 @@ from app.main import app
 
 
 def _client():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
 
@@ -70,6 +72,23 @@ def test_cross_origin_port_is_blocked():
             "/login",
             data={"username": "admin", "password": "wrong"},
             headers={"Origin": "http://testserver:8080"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+    assert response.status_code == 403
+
+
+def test_forwarded_host_cannot_override_the_validated_host():
+    client, engine = _client()
+    try:
+        response = client.post(
+            "/login",
+            data={"username": "admin", "password": "wrong"},
+            headers={
+                "Origin": "http://evil.example",
+                "X-Forwarded-Host": "evil.example",
+            },
         )
     finally:
         app.dependency_overrides.clear()

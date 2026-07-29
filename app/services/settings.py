@@ -83,7 +83,9 @@ def parse_sales_gst_ledger_mappings(raw: str | None) -> dict[str, dict[str, str]
         key = gst_rate_key(rate)
         required_ledgers = (sales_ledger, cgst_ledger, sgst_ledger)
         if not all(required_ledgers) or (len(parts) == 5 and not igst_ledger):
-            raise ValueError(f"Sales GST ledger mapping line {line_number} has an empty ledger name.")
+            raise ValueError(
+                f"Sales GST ledger mapping line {line_number} has an empty ledger name."
+            )
         if key in mappings:
             raise ValueError(f"GST rate {key}% is listed more than once.")
         mappings[key] = {
@@ -146,7 +148,9 @@ def clear_legacy_placeholder_settings(db: Session) -> None:
         if row:
             row.value = DEFAULT_SETTINGS[key]
 
-    legacy_companies = db.scalars(select(Company).where(Company.name == LEGACY_PLACEHOLDER_SETTINGS["company_name"])).all()
+    legacy_companies = db.scalars(
+        select(Company).where(Company.name == LEGACY_PLACEHOLDER_SETTINGS["company_name"])
+    ).all()
     for company in legacy_companies:
         try:
             config = json.loads(company.config)
@@ -178,10 +182,7 @@ def company_config(company: Company) -> dict[str, str]:
         stored = json.loads(company.config)
     except (TypeError, ValueError):
         stored = {}
-    return {
-        key: str(stored.get(key, DEFAULT_SETTINGS[key]) or "")
-        for key in COMPANY_SETTING_KEYS
-    }
+    return {key: str(stored.get(key, DEFAULT_SETTINGS[key]) or "") for key in COMPANY_SETTING_KEYS}
 
 
 def ensure_company_records(db: Session) -> None:
@@ -241,7 +242,9 @@ def add_company(db: Session, name: str, config: dict[str, str], *, commit: bool 
     return company
 
 
-def update_company(db: Session, company_id: int, name: str, config: dict[str, str], *, commit: bool = True) -> Company:
+def update_company(
+    db: Session, company_id: int, name: str, config: dict[str, str], *, commit: bool = True
+) -> Company:
     company = db.get(Company, company_id)
     if not company:
         return _raise("Company not found.")
@@ -249,9 +252,7 @@ def update_company(db: Session, company_id: int, name: str, config: dict[str, st
     label = (name or clean["company_name"]).strip()
     if not label:
         return _raise("A company label is required.")
-    duplicate = db.scalar(
-        select(Company).where(Company.name == label, Company.id != company.id)
-    )
+    duplicate = db.scalar(select(Company).where(Company.name == label, Company.id != company.id))
     if duplicate:
         return _raise(f"A company named '{label}' already exists.")
     error = validate_company_fields(clean)
@@ -322,7 +323,9 @@ def save_active_company_config(db: Session, config: dict[str, str], *, commit: b
             raise
 
 
-def persist_settings_and_active_company(db: Session, values: dict[str, str], *, commit: bool = True) -> None:
+def persist_settings_and_active_company(
+    db: Session, values: dict[str, str], *, commit: bool = True
+) -> None:
     _apply_settings(db, values)
     save_active_company_config(db, values, commit=False)
     if commit:

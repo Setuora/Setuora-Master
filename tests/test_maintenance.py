@@ -95,7 +95,9 @@ def test_maintenance_exposes_backup_controls_but_no_browser_reset_or_restore(
     assert 'action="/maintenance/backup-settings"' in root_page.text
     assert 'action="/maintenance/reset"' not in root_page.text
     assert 'action="/maintenance/restore-upload"' not in root_page.text
-    assert "Browser-based database reset and restore are intentionally unavailable" in root_page.text
+    assert (
+        "Browser-based database reset and restore are intentionally unavailable" in root_page.text
+    )
     assert reset.status_code == 404
     assert restore.status_code == 404
 
@@ -194,9 +196,7 @@ def test_invalid_backup_settings_redirect_with_validation_error(monkeypatch):
         engine.dispose()
 
     assert response.status_code == 303
-    assert response.headers["location"] == (
-        "/maintenance?error=Backup%20folder%20is%20required."
-    )
+    assert response.headers["location"] == ("/maintenance?error=Backup%20folder%20is%20required.")
 
 
 def test_download_backup_failure_redirects_to_maintenance(monkeypatch):

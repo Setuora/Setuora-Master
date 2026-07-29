@@ -37,12 +37,9 @@
     }
     if (field.tagName === "SELECT") {
       const savedValue = value == null ? "" : String(value);
-      const hasOption = Array.prototype.some.call(
-        field.options,
-        function (option) {
-          return option.value === savedValue;
-        },
-      );
+      const hasOption = Array.prototype.some.call(field.options, function (option) {
+        return option.value === savedValue;
+      });
       if (hasOption) field.value = savedValue;
       return;
     }
@@ -60,11 +57,7 @@
       const data = new FormData();
       fields(form).forEach(function (field) {
         if (!field.name || field.hasAttribute("data-no-autosave")) return;
-        if (
-          (field.type === "checkbox" || field.type === "radio") &&
-          !field.checked
-        )
-          return;
+        if ((field.type === "checkbox" || field.type === "radio") && !field.checked) return;
         data.append(field.name, field.value);
       });
       setStatus(status, "Saving...", "saving");
@@ -79,11 +72,7 @@
           });
         })
         .then(function (p) {
-          setStatus(
-            status,
-            p.ok ? "Saved" : p.error || "Save failed",
-            p.ok ? "ok" : "error",
-          );
+          setStatus(status, p.ok ? "Saved" : p.error || "Save failed", p.ok ? "ok" : "error");
         })
         .catch(function () {
           setStatus(status, "Save failed", "error");
@@ -112,11 +101,7 @@
       const draft = {};
       fields(form).forEach(function (field) {
         if (!field.name || field.type === "password") return;
-        if (
-          (field.type === "checkbox" || field.type === "radio") &&
-          !field.checked
-        )
-          return;
+        if ((field.type === "checkbox" || field.type === "radio") && !field.checked) return;
         draft[field.name] = field.value;
       });
       try {

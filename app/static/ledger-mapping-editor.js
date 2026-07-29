@@ -34,9 +34,7 @@
   }
 
   function initEditor(editor) {
-    const hidden = editor.querySelector(
-      'input[name="sales_gst_ledger_mappings"]',
-    );
+    const hidden = editor.querySelector('input[name="sales_gst_ledger_mappings"]');
     const list = editor.querySelector("[data-ledger-mapping-list]");
     const empty = editor.querySelector("[data-ledger-mapping-empty]");
     const summary = editor.querySelector("[data-ledger-summary]");
@@ -50,9 +48,7 @@
       const count = rows().length;
       empty.hidden = count > 0;
       summary.textContent =
-        count > 0
-          ? "Product GST ledgers (" + count + ")"
-          : "Add product ledger";
+        count > 0 ? "Product GST ledgers (" + count + ")" : "Add product ledger";
     }
 
     function serialize() {
@@ -60,9 +56,7 @@
         .map(function (row) {
           return ["rate", "sales", "cgst", "sgst", "igst"]
             .map(function (field) {
-              return row
-                .querySelector('[data-ledger-field="' + field + '"]')
-                .value.trim();
+              return row.querySelector('[data-ledger-field="' + field + '"]').value.trim();
             })
             .join(" | ");
         })

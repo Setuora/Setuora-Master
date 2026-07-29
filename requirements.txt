@@ -1,4 +1,5 @@
-# Direct dependencies for the Setuora Master application and release checks.
+# Direct runtime dependencies for Setuora Master.
+defusedxml==0.7.1
 fastapi==0.138.0
 starlette==1.3.1
 uvicorn[standard]==0.49.0
@@ -6,5 +7,3 @@ sqlalchemy==2.0.25
 jinja2==3.1.6
 python-multipart==0.0.32
 pydantic==2.13.4
-pytest==9.0.3
-httpx2==2.9.1

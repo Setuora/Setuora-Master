@@ -1,0 +1,79 @@
+name: setuora-master
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.98.9@sha256:f15d5d3f4a68773a853180b72496f70ba614b64de0878c43fe3da39fe0afba47
+    hostname: ${TAILSCALE_HOSTNAME:-setuora-master}
+    environment:
+      TS_AUTHKEY: ${TAILSCALE_AUTH_KEY:-}
+      TS_AUTH_ONCE: "true"
+      TS_EXTRA_ARGS: --advertise-tags=${TAILSCALE_TAG:-tag:setuora-master}
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_HOSTNAME: ${TAILSCALE_HOSTNAME:-setuora-master}
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
+      TS_SERVE_CONFIG: /etc/setuora-tailscale/serve.json
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./deployment/tailscale:/etc/setuora-tailscale:ro
+    ports:
+      - "127.0.0.1:${SETUORA_LOCAL_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9002/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  setuora:
+    build:
+      context: .
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      APP_NAME: ${APP_NAME:-Setuora Master}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      AUTOMATIC_BACKUPS_ENABLED: ${AUTOMATIC_BACKUPS_ENABLED:-true}
+      BACKUP_DIRECTORY: /srv/setuora/data/backups
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-14}
+      BACKUP_STARTUP_DELAY_SECONDS: ${BACKUP_STARTUP_DELAY_SECONDS:-60}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      DATABASE_URL: sqlite:////srv/setuora/data/setuora.db
+      FRANCHISE_OFFLINE_MINUTES: ${FRANCHISE_OFFLINE_MINUTES:-15}
+      LOGIN_LOCKOUT_MINUTES: ${LOGIN_LOCKOUT_MINUTES:-15}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-8}
+      NODE_API_MAX_BODY_BYTES: ${NODE_API_MAX_BODY_BYTES:-5242880}
+      NODE_API_MAX_EVENT_ITEMS: ${NODE_API_MAX_EVENT_ITEMS:-5000}
+      NODE_API_RATE_LIMIT_PER_MINUTE: ${NODE_API_RATE_LIMIT_PER_MINUTE:-120}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_TIMEOUT_MINUTES: ${SESSION_TIMEOUT_MINUTES:-480}
+      SETUORA_APP_MODE: master
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*.ts.net,127.0.0.1,localhost}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - setuora-data:/srv/setuora/data
+    init: true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  setuora-data:
+  tailscale-state:

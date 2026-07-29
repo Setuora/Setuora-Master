@@ -16,7 +16,6 @@ from app.models import (
 )
 from app.services.tally_masters import TallyLedger, TallySalesVoucher
 
-
 COMPANY_RESOURCE = "company"
 LEDGER_RESOURCE = "ledger"
 TALLY_USER_RESOURCE = "tally_user"
@@ -144,17 +143,6 @@ def filter_sales_vouchers(
             if resource_key(voucher.tally_user) in allowed_users
         ]
     return visible
-
-
-def allowed_ledger_names(db: Session, user: User, company_id: int) -> set[str] | None:
-    ledger_assignments = _assignments(db, user, LEDGER_RESOURCE)
-    if not ledger_assignments:
-        return None
-    return {
-        row.resource_key
-        for row in ledger_assignments
-        if row.company_id == company_id
-    }
 
 
 def replace_user_access(

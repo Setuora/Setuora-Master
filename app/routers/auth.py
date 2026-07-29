@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,7 +10,6 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import LoginAudit
 from app.security import create_session_token, hash_password, verify_password
-from app.services.access_control import get_role_access_config, landing_path_for
 from app.templates import templates
 
 router = APIRouter()
@@ -31,19 +30,25 @@ def recent_failed_logins(db: Session, username: str, window_minutes: int) -> int
 
 
 @router.get("/login")
-def login_page(request: Request, restored: str = "", db: Session = Depends(get_db)):
+def login_page(request: Request, db: Session = Depends(get_db)):
     user = current_user(request, db)
     if user:
-        destination = "/account/password" if user.must_change_password else landing_path_for(get_role_access_config(db), user.role)
+        destination = (
+            "/account/password"
+            if user.must_change_password
+            else "/"
+        )
         return RedirectResponse(destination, status_code=303)
-    message = "Backup import completed. Sign in with an account from the restored backup." if restored else None
-    return templates.TemplateResponse(request, "login.html", {"request": request, "error": None, "message": message})
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"request": request, "error": None, "message": None},
+    )
 
 
 @router.post("/login")
 def login(
     request: Request,
-    response: Response,
     username: str = Form(...),
     password: str = Form(...),
     db: Session = Depends(get_db),
@@ -87,7 +92,11 @@ def login(
         )
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
-    destination = "/account/password" if user.must_change_password else landing_path_for(get_role_access_config(db), user.role)
+    destination = (
+        "/account/password"
+        if user.must_change_password
+        else "/"
+    )
     redirect = RedirectResponse(destination, status_code=303)
     redirect.set_cookie(
         SESSION_COOKIE,

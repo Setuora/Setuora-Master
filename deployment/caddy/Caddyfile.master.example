@@ -1,0 +1,141 @@
+# PUBLIC EDGE EXAMPLE — NOT A COMPLETE PRODUCTION DEPLOYMENT.
+#
+# This file belongs on the public edge VPS, not beside Tally. Replace every
+# `.invalid` hostname, email, log path, and WireGuard address. Validate the final
+# file with the exact pinned Caddy release and pass the edge acceptance tests.
+#
+# Public firewall:
+#   TCP 443 - this HTTPS virtual host
+#   UDP 443 - WireGuard, if that is the selected tunnel port
+# Deny all other public ingress, including TCP 80. Use TLS-ALPN-01 on TCP 443 or
+# an approved DNS challenge. Never use `tls internal` for Internet Lite nodes.
+
+{
+	email operations@example.invalid
+	admin 127.0.0.1:2019
+	# WireGuard uses UDP 443 in this topology, so Caddy must not also bind the
+	# HTTP/3/QUIC UDP listener. HTTPS remains available over HTTP/1.1 and HTTP/2.
+	servers {
+		protocols h1 h2
+	}
+}
+
+sync.example.invalid {
+	# Response compression is allowed. Compressed Node Sync request bodies are
+	# rejected below.
+	encode zstd gzip
+
+	# Master defaults NODE_API_MAX_BODY_BYTES to 5,242,880 bytes. The
+	# request_body directive is experimental and requires Caddy v2.10.0 or
+	# newer; pin and validate the chosen build and keep both limits aligned.
+	request_body {
+		max_size 5MiB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Default Caddy access logs do not record Authorization or request bodies.
+	# Verify that any added fields/modules preserve that rule, protect this file,
+	# rotate it, and ship it to a destination the edge cannot silently erase.
+	log {
+		output file /var/log/caddy/setuora-node-sync-access.json {
+			roll_size 100MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format json
+	}
+
+	@compressedNodeRequest {
+		path /api/v1/node /api/v1/events /api/v1/commands /api/v1/commands/*
+		header Content-Encoding *
+	}
+
+	@missingEventLength {
+		method POST
+		path /api/v1/events
+		not header Content-Length *
+	}
+
+	@invalidEventMediaType {
+		method POST
+		path /api/v1/events
+		not header Content-Type application/json*
+	}
+
+	@invalidAckMediaType {
+		method PATCH
+		path /api/v1/commands/*
+		not header Content-Type application/json*
+	}
+
+	@nodeMetadata {
+		method GET
+		path /api/v1/node
+	}
+
+	@eventUpload {
+		method POST
+		path /api/v1/events
+	}
+
+	@commandPoll {
+		method GET
+		path /api/v1/commands
+	}
+
+	@commandAck {
+		method PATCH
+		path /api/v1/commands/*
+	}
+
+	# `route` preserves this security-filter order. The private upstream is the
+	# Master WireGuard address; a private ingress proxy listens on 8443 and then
+	# forwards to Uvicorn on 127.0.0.1:8000.
+	route {
+		respond @compressedNodeRequest 415
+		respond @missingEventLength 411
+		respond @invalidEventMediaType 415
+		respond @invalidAckMediaType 415
+
+		reverse_proxy @nodeMetadata http://10.66.0.2:8443 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+		}
+
+		reverse_proxy @eventUpload http://10.66.0.2:8443 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+		}
+
+		reverse_proxy @commandPoll http://10.66.0.2:8443 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+		}
+
+		reverse_proxy @commandAck http://10.66.0.2:8443 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto https
+		}
+
+		# Never expose Master login, reports, maintenance, backups, OpenAPI,
+		# static files, or arbitrary application paths on the sync hostname.
+		respond 404
+	}
+}
+
+# Stock Caddy has no authenticated Setuora-credential rate limiter in this
+# example. Master currently enforces 120 requests per rolling 60 seconds per
+# credential in process memory. Before production, add a reviewed shared/edge
+# limiter or approved Caddy module and test it with carrier-NAT franchises,
+# outage bursts, revoked credentials, large slow bodies, and spoofed forwarding
+# headers. Never use source IP as the franchise authorization boundary.

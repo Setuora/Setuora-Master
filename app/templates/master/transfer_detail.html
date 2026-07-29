@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Transfer {{ transfer.reference }} - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">{{ transfer.source_franchise.code }} → {{ transfer.destination_franchise.code }}</p><h1>{{ transfer.reference }}</h1></div>
+  <a class="button" href="/network/transfers">Back to transfers</a>
+</section>
+<section class="panel">
+  <dl class="details">
+    <dt>Transfer ID</dt><dd>{{ transfer.public_id }}</dd>
+    <dt>Status</dt><dd><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></dd>
+    <dt>Dispatched</dt><dd>{{ transfer.created_at|report_date }}</dd>
+    <dt>Fully received</dt><dd>{{ transfer.received_at|report_date if transfer.received_at else 'Not yet' }}</dd>
+  </dl>
+</section>
+<section class="panel">
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Serial</th><th>Product</th><th>Quantity</th><th>Receipt</th><th>Received at</th></tr></thead>
+      <tbody>
+        {% for item in transfer.items %}
+        <tr>
+          <td>{{ item.serial.serial_number }}</td>
+          <td>{{ item.serial.product.product_code if item.serial.product else '—' }}<small>{{ item.serial.product.product_name if item.serial.product else '' }}</small></td>
+          <td>{{ item.received_quantity }} / {{ item.quantity }}</td>
+          <td><span class="status {{ 'synced' if item.received_quantity == item.quantity else 'pending_sync' }}">{{ 'Received' if item.received_quantity == item.quantity else 'In transit' }}</span></td>
+          <td>{{ item.received_at|report_date if item.received_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

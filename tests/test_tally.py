@@ -1,12 +1,8 @@
-from datetime import datetime, timezone
 from decimal import Decimal
-from types import SimpleNamespace
 from xml.etree import ElementTree as ET
 
 import pytest
-from starlette.requests import Request
 
-from app.auth import SESSION_COOKIE
 from app.models import (
     BatchStatus,
     BatchType,
@@ -17,15 +13,22 @@ from app.models import (
     StorageLocation,
     User,
 )
-from app.routers import batches as batches_router
-from app.security import create_session_token
-from app.services.access_control import default_role_access_config
 from app.services import tally as tally_service
-from app.services.inventory import apply_batch_statuses, add_serial_to_batch, create_batch, generate_serials
-from app.services.shelf_verification import verify_pending_items_on_shelf
 from app.services.settings import update_settings
-from app.services.tally import TallyResult, TallySyncError, build_voucher_xml, post_to_tally, sync_batch
-from app.templates import templates
+from app.services.tally import (
+    TallyResult,
+    TallySyncError,
+    build_voucher_xml,
+    post_to_tally,
+    sync_batch,
+)
+from tests.factories import (
+    add_serial_to_batch,
+    apply_batch_statuses,
+    create_batch,
+    generate_serials,
+    verify_pending_items_on_shelf,
+)
 
 
 class _FakeResponse:
@@ -74,20 +77,6 @@ VALID_SETTINGS = {
 }
 
 
-def _signed_request(user_id: int, path: str, method: str = "POST") -> Request:
-    return Request(
-        {
-            "type": "http",
-            "method": method,
-            "path": path,
-            "headers": [(b"cookie", f"{SESSION_COOKIE}={create_session_token(user_id)}".encode())],
-            "query_string": b"",
-            "server": ("testserver", 80),
-            "scheme": "http",
-        }
-    )
-
-
 def test_tally_xml_requires_party_on_the_batch(db_session):
     user = User(username="sales", password_hash="x", role="sales")
     db_session.add(user)
@@ -96,65 +85,6 @@ def test_tally_xml_requires_party_on_the_batch(db_session):
 
     with pytest.raises(TallySyncError, match="customer or supplier"):
         build_voucher_xml(batch, VALID_SETTINGS)
-
-
-@pytest.mark.parametrize(
-    ("batch_type", "role", "initial_status"),
-    [
-        (BatchType.PURCHASE, "purchase", SerialStatus.GENERATED),
-        (BatchType.SALE, "sales", SerialStatus.IN_STOCK),
-    ],
-)
-def test_submitting_purchase_or_sale_automatically_starts_tally_sync(
-    monkeypatch,
-    db_session,
-    batch_type,
-    role,
-    initial_status,
-):
-    user = User(username=f"auto-{role}", password_hash="x", role=role, active=True)
-    product = Product(
-        product_code=f"AUTO-{batch_type.value}",
-        product_name=f"Automatic {batch_type.value}",
-        hsn="0910",
-        gst_rate=5,
-        unit="Pcs",
-        default_rate=100,
-        tally_stock_item_name=f"Automatic {batch_type.value}",
-    )
-    location = StorageLocation(
-        code=f"AUTO-{batch_type.value}-SHELF",
-        warehouse="MAIN",
-        zone="A",
-        section="1",
-        rack="R1",
-        shelf="S1",
-        bin="B1",
-    )
-    db_session.add_all([user, product, location])
-    db_session.commit()
-    serial = generate_serials(db_session, product, 1, initial_status=initial_status)[0]
-    batch = create_batch(db_session, user, batch_type, "Tally Party", "")
-    add_serial_to_batch(db_session, batch, user, serial.serial_number)
-    if batch_type == BatchType.PURCHASE:
-        verify_pending_items_on_shelf(db_session, batch=batch, location=location, user=user)
-
-    synced_batch_ids: list[int] = []
-    monkeypatch.setattr(
-        batches_router,
-        "sync_batch",
-        lambda _db, submitted_batch: synced_batch_ids.append(submitted_batch.id),
-    )
-
-    response = batches_router.submit_batch(
-        _signed_request(user.id, f"/batches/{batch.id}/submit"),
-        batch.id,
-        db_session,
-    )
-
-    assert response.status_code == 303
-    assert synced_batch_ids == [batch.id]
-    assert batch.status == BatchStatus.SUBMITTED.value
 
 
 def test_sale_batch_xml_groups_serials_by_product(db_session):
@@ -234,7 +164,7 @@ def test_sale_batch_xml_includes_buyer_gst_details(db_session):
         party_state="Karnataka",
         party_gst_registration_type=GstRegistrationType.REGULAR.value,
         party_gst_name="Buyer Registered Name",
-        party_gstin="29abcde1234f1z5",
+        party_gstin="29ABCDE1234F1Z5",
     )
     add_serial_to_batch(db_session, batch, user, serial.serial_number)
     apply_batch_statuses(db_session, batch, user)
@@ -523,66 +453,6 @@ def test_purchase_voucher_xml_is_balanced(db_session):
     xml = build_voucher_xml(batch, VALID_SETTINGS)
 
     assert _accounting_sum(xml) == Decimal("0.00")
-
-
-def test_batch_list_exposes_purchase_sale_and_sales_return_tally_xml_exports():
-    user = SimpleNamespace(
-        username="admin",
-        role="admin",
-        _access_config=default_role_access_config(),
-    )
-    request = SimpleNamespace(url=SimpleNamespace(path="/batches"), query_params={})
-    created_at = datetime(2026, 6, 29, 9, 0, tzinfo=timezone.utc)
-    batches = [
-        SimpleNamespace(
-            id=101,
-            batch_number="PUR-20260629-0001",
-            batch_type=BatchType.PURCHASE.value,
-            party_name="Supplier",
-            reason_code=None,
-            status=BatchStatus.PENDING_SYNC.value,
-            items=[object()],
-            retry_count=0,
-            created_at=created_at,
-        ),
-        SimpleNamespace(
-            id=102,
-            batch_number="SAL-20260629-0001",
-            batch_type=BatchType.SALE.value,
-            party_name="Customer",
-            reason_code=None,
-            status=BatchStatus.PENDING_SYNC.value,
-            items=[object()],
-            retry_count=0,
-            created_at=created_at,
-        ),
-        SimpleNamespace(
-            id=103,
-            batch_number="SRT-20260629-0001",
-            batch_type=BatchType.SALES_RETURN.value,
-            party_name="Customer",
-            reason_code="GOOD",
-            status=BatchStatus.PENDING_SYNC.value,
-            items=[object()],
-            retry_count=0,
-            created_at=created_at,
-        ),
-    ]
-
-    html = templates.env.get_template("batches.html").render(
-        request=request,
-        user=user,
-        batches=batches,
-    )
-
-    assert 'href="/batches/new?batch_type=PURCHASE">Purchase</a>' in html
-    assert 'href="/batches/new?batch_type=SALE">Sale</a>' in html
-    assert 'href="/batches/101/tally.xml"' in html
-    assert 'href="/batches/102/tally.xml"' in html
-    assert 'href="/batches/103/tally.xml"' in html
-    assert 'action="/batches/101/retry"' in html
-    assert 'action="/batches/102/retry"' in html
-    assert 'action="/batches/103/retry"' in html
 
 
 def test_purchase_and_sale_batches_sync_to_tally(monkeypatch, db_session):

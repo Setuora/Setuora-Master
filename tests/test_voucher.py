@@ -1,6 +1,11 @@
 from app.models import BatchType, GstTreatment, Product, SerialStatus, User
-from app.services.inventory import add_serial_to_batch, create_batch, generate_serials, update_batch_item_rate
-from app.services.voucher import calculate_voucher_summary, validate_priced_batch
+from app.services.voucher import calculate_voucher_summary
+from tests.factories import (
+    add_serial_to_batch,
+    create_batch,
+    generate_serials,
+    update_batch_item_rate,
+)
 
 
 def make_product(code="SG020", rate=500):
@@ -186,19 +191,3 @@ def test_mixed_rates_split_product_lines(db_session):
     summary = calculate_voucher_summary(batch)
     assert len(summary.lines) == 2
     assert sorted(str(line.rate) for line in summary.lines) == ["500.00", "600.00"]
-
-
-def test_priced_batch_requires_positive_rate(db_session):
-    user = User(username="purchase", password_hash="x", role="purchase")
-    product = make_product("SG022", 0)
-    db_session.add_all([user, product])
-    db_session.commit()
-    serial = generate_serials(db_session, product, 1)[0]
-    batch = create_batch(db_session, user, BatchType.RECEIVE, "Supplier", "")
-    add_serial_to_batch(db_session, batch, user, serial.serial_number)
-    try:
-        validate_priced_batch(batch)
-    except ValueError as exc:
-        assert "Set a positive rate" in str(exc)
-    else:
-        assert False

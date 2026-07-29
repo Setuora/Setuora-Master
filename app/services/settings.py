@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, Setting
 
-
 COMPANY_SETTING_KEYS = [
     "company_name",
     "tally_host",

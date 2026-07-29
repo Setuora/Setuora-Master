@@ -5,11 +5,24 @@ from types import SimpleNamespace
 
 from sqlalchemy import event
 
-from app.models import BatchStatus, BatchType, Product, SerialStatus, Setting, User, utc_now
+from app.models import (
+    BatchStatus,
+    BatchType,
+    Product,
+    SerialStatus,
+    Setting,
+    User,
+    utc_now,
+)
 from app.services import sync_worker
 from app.services import tally as tally_service
-from app.services.inventory import add_serial_to_batch, apply_batch_statuses, create_batch, generate_serials
 from app.services.tally import TallyResult, sync_batch
+from tests.factories import (
+    add_serial_to_batch,
+    apply_batch_statuses,
+    create_batch,
+    generate_serials,
+)
 
 
 def test_retry_worker_start_replaces_finished_task(monkeypatch):

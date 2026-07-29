@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Tally {{ batch.batch_number }} - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">{{ event.franchise.code }} · {{ event.event_type|replace('_', ' ')|title }}</p><h1>{{ batch.batch_number }}</h1></div>
+  <div class="actions">
+    <a class="button" href="/network/tally">Back to queue</a>
+    {% if has_role(user, 'super_admin', 'admin') and batch.status in ['SUBMITTED', 'PENDING_SYNC', 'FAILED'] %}
+    <form method="post" action="/network/tally/{{ batch.id }}/retry"><button class="button primary" type="submit">Retry now</button></form>
+    {% endif %}
+  </div>
+</section>
+<section class="panel">
+  <dl class="details">
+    <dt>Status</dt><dd><span class="status {{ batch.status|lower }}">{{ batch.status|replace('_', ' ')|title }}</span></dd>
+    <dt>Source reference</dt><dd>{{ event.reference or '—' }}</dd>
+    <dt>Tally reference</dt><dd>{{ batch.tally_reference or '—' }}</dd>
+    <dt>Retry count</dt><dd>{{ batch.retry_count }}</dd>
+    <dt>Last error</dt><dd>{{ batch.last_error or '—' }}</dd>
+  </dl>
+</section>
+<section class="panel">
+  <div class="section-title"><h2>Attempt history</h2></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Time</th><th>Status</th><th>Error</th><th>Request</th><th>Response</th></tr></thead>
+      <tbody>
+        {% for attempt in batch.sync_attempts|sort(attribute='created_at', reverse=true) %}
+        <tr>
+          <td>{{ attempt.created_at|report_date }}</td>
+          <td><span class="status {{ attempt.status|lower }}">{{ attempt.status|replace('_', ' ')|title }}</span></td>
+          <td>{{ attempt.error or '—' }}</td>
+          <td>{{ 'Captured' if attempt.request_xml else '—' }}</td>
+          <td>{{ 'Captured' if attempt.response_xml else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No sync attempt has run yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

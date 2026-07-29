@@ -16,7 +16,7 @@ if not exist "%STOP_SCRIPT%" (
     exit /b 1
 )
 
-echo Stopping Setuora QR Tally Bridge...
+echo Stopping Setuora Master...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%STOP_SCRIPT%" -ProjectDir "%PROJECT_DIR%" %1 %2 %3 %4 %5 %6 %7 %8 %9
 set "STOP_EXIT=%ERRORLEVEL%"
 echo.

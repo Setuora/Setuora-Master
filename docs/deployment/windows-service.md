@@ -1,54 +1,85 @@
-# Windows Service Guide
+# Setuora Master Windows Service
 
-Use NSSM to run Setuora automatically after reboot. The easier path is to run
-`Setuora.exe setup` as Administrator; automatic Setuora and Caddy services are
-the default. Use this guide when installing or repairing the service manually.
+The Windows pilot runs one Uvicorn process with the in-process Tally retry and
+backup workers. Do not install multiple application instances against SQLite.
 
-## Files
+## Automated installation
 
-- Example install script: `deployment/windows/install_service.ps1`
-- Default service name: `SetuoraQrTallyBridge`
-- App command: `.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000`
-- Logs: `logs\setuora-out.log` and `logs\setuora-err.log`
+Run:
 
-The installer runs the service as `NT AUTHORITY\LocalService`, not LocalSystem.
-It grants that account read access to the application and write access only to
-`data\` and `logs\`. If an off-machine backup needs an authenticated network
-share, use a separately reviewed service-account deployment instead of granting
-the default account broader rights.
+```powershell
+.\Setuora.exe setup --install-dir C:\Setuora-Master
+```
 
-## Steps
+The setup utility can install the application and private Caddy services with
+automatic startup and recovery.
 
-1. Run `scripts\setup.bat` first so `.venv`, `.env`, `data\`, and `logs\` exist.
-2. Download `nssm.exe` and place it somewhere stable, for example `C:\Tools\nssm\nssm.exe`.
-3. Open PowerShell as Administrator.
-4. Run the install script with the correct paths.
+## Manual NSSM installation
+
+After creating `.venv` and `.env`, run from an Administrator PowerShell:
 
 ```powershell
 .\deployment\windows\install_service.ps1 `
-  -ProjectDir "C:\Setuora" `
-  -NssmPath "C:\Tools\nssm\nssm.exe"
+  -ProjectDir "C:\Setuora-Master" `
+  -NssmPath "C:\Tools\nssm\nssm.exe" `
+  -Port 8000
 ```
 
-## Service Controls
+The service command is:
 
-```powershell
-nssm status SetuoraQrTallyBridge
-nssm restart SetuoraQrTallyBridge
-nssm stop SetuoraQrTallyBridge
+```text
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Logs should be written to:
+The helper runs the application as `NT AUTHORITY\LocalService`, grants read
+access to the application, and grants write access only to `data\` and `logs\`.
+
+The internal service name remains `SetuoraQrTallyBridge` for upgrade
+compatibility with existing installations. It does not change the Master
+application boundary.
+
+## Logs
 
 ```text
 logs\setuora-out.log
 logs\setuora-err.log
 ```
 
-Restart the service after editing `.env`:
+Logs rotate at the configured size. Protect them because operational errors can
+contain business identifiers. They must never contain node secrets or
+authorization headers.
+
+## Controls
 
 ```powershell
-nssm restart SetuoraQrTallyBridge
+.\Setuora.exe start
+.\Setuora.exe stop
+.\Setuora.exe repair
 ```
 
-If Caddy is used for LAN HTTPS, keep the Setuora service on `127.0.0.1:8000` and let Caddy expose the local HTTPS hostname.
+The executable requests elevation when service control requires it.
+
+## Private proxy
+
+The optional local Caddy service provides private administrative HTTPS only.
+Keep it dependent on the application service and restrict its firewall rule to
+the management network.
+
+The public Node Sync edge is a separate host and configuration. See
+[master-internet-edge.md](master-internet-edge.md).
+
+## Verification
+
+After installation:
+
+1. verify both services use automatic startup;
+2. verify the application service uses `LocalService`;
+3. restart Windows;
+4. confirm `http://127.0.0.1:8000/health` reports `role=master`;
+5. confirm the private HTTPS health endpoint;
+6. confirm the administrative site is unreachable from unapproved networks;
+7. create a verified backup;
+8. inspect service logs for restart loops.
+
+Run the [pilot release checklist](production-release-checklist.md) before
+acceptance.

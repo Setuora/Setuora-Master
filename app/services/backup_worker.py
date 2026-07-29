@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import logging
+from contextlib import suppress
 
 from fastapi import FastAPI
 
 from app.config import get_settings
 from app.services.backup import create_scheduled_backup
-
 
 logger = logging.getLogger("setuora")
 

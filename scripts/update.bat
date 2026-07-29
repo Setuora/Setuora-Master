@@ -135,27 +135,27 @@ function Start-SetuoraServer {
             Write-Host "Setuora and Caddy HTTPS are running as Windows services." -ForegroundColor Green
         }
         else {
-            Write-Host "Setuora is running, but Caddy HTTPS is not installed. Run Setuora.exe setup to enable phone and laptop access." -ForegroundColor Yellow
+            Write-Host "Setuora Master is running, but private Caddy HTTPS is not installed. Run Setuora.exe setup to enable private browser access." -ForegroundColor Yellow
         }
-        Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health" -DisplayName "Setuora local health check"
+        Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health" -DisplayName "Setuora Master local health check"
         if ($caddyService) {
             $caddyAddress = Get-CaddyAddress
             if (-not $caddyAddress) {
                 throw "Caddy is running, but no HTTPS address could be read from '$Caddyfile'."
             }
-            Wait-HealthEndpoint -Uri "https://$caddyAddress/health" -DisplayName "Setuora Caddy HTTPS"
+            Wait-HealthEndpoint -Uri "https://$caddyAddress/health" -DisplayName "Setuora Master Caddy HTTPS"
         }
         return $true
     }
 
     if ($restartAsConsole) {
         Start-Process -FilePath $StartScript -ArgumentList @("-HostAddress", "$restartHostAddress", "-Port", "$restartPort", "--console-only")
-        Wait-HealthEndpoint -Uri "http://127.0.0.1:$restartPort/health" -DisplayName "Setuora local health check"
+        Wait-HealthEndpoint -Uri "http://127.0.0.1:$restartPort/health" -DisplayName "Setuora Master local health check"
         $caddyAddress = Get-CaddyAddress
         if ($caddyAddress) {
-            Wait-HealthEndpoint -Uri "https://$caddyAddress/health" -DisplayName "Setuora Caddy HTTPS"
+            Wait-HealthEndpoint -Uri "https://$caddyAddress/health" -DisplayName "Setuora Master Caddy HTTPS"
         }
-        Write-Host "Setuora is running in a new window." -ForegroundColor Green
+        Write-Host "Setuora Master is running in a new window." -ForegroundColor Green
         return $true
     }
 
@@ -180,7 +180,7 @@ if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
     throw "Git was not found. Install Git for Windows, then run scripts\update.bat again."
 }
 if (-not (Test-Path (Join-Path $ProjectRoot ".git"))) {
-    throw "'$ProjectRoot' is not a Git checkout. Clone https://github.com/Dijo-404/Proj_Setu.git before using scripts\update.bat."
+    throw "'$ProjectRoot' is not a Git checkout. Clone https://github.com/Setuora/Setuora-Master.git before using scripts\update.bat."
 }
 if (-not (Test-Path $VenvPython)) {
     throw "Setuora is not set up yet. Run scripts\setup.bat first."
@@ -200,10 +200,10 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)) {
 
 $originUrl = (@(& git remote get-url origin) -join "").Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($originUrl)) {
-    throw "The Git remote named 'origin' is missing. It should point to https://github.com/Dijo-404/Proj_Setu.git."
+    throw "The Git remote named 'origin' is missing. It should point to https://github.com/Setuora/Setuora-Master.git."
 }
-if ($originUrl -notmatch "(?i)github\.com[:/]Dijo-404/Proj_Setu(?:\.git)?/?$") {
-    throw "The Git remote named 'origin' points to '$originUrl', not https://github.com/Dijo-404/Proj_Setu.git."
+if ($originUrl -notmatch "(?i)^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)Setuora/Setuora-Master(?:\.git)?/?$") {
+    throw "The Git remote named 'origin' points to '$originUrl', not https://github.com/Setuora/Setuora-Master.git."
 }
 
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue

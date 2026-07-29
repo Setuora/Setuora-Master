@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "partials/ledger_mapping_editor.html" import sales_ledger_editor %}
-{% block title %}Tally Check - Setuora{% endblock %}
+{% block title %}Tally Check - Setuora Master{% endblock %}
 {% block content %}
 <section class="page-head">
   <div>
@@ -38,7 +38,7 @@
     {% else %}
     <div class="empty company-empty">
       <p>No company profiles are available for this account.</p>
-      {% if role_can(user, 'page_settings') and role_can(user, 'settings_edit') %}
+      {% if role_can(user, 'settings_edit') %}
       <a class="button primary" href="/settings">Add a company</a>
       {% endif %}
     </div>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings - Setuora{% endblock %}
+{% block title %}Settings - Setuora Master{% endblock %}
 {% from "partials/ledger_mapping_editor.html" import sales_ledger_editor %}
 {% block content %}
 <section class="page-head">
@@ -7,9 +7,9 @@
     <p class="eyebrow">System</p>
     <h1>Settings</h1>
   </div>
-  {% if (role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit')) or has_role(user, 'super_admin') %}
+  {% if role_can(user, 'tally_check_edit') or has_role(user, 'super_admin') %}
   <div class="actions">
-    {% if role_can(user, 'page_tally_check') and role_can(user, 'tally_check_edit') %}
+    {% if role_can(user, 'tally_check_edit') %}
     <a class="button" href="/tally-check">Tally Check</a>
     {% endif %}
     {% if has_role(user, 'super_admin') %}
@@ -67,7 +67,7 @@
   <form method="post" action="/settings/companies" class="stack">
     <p class="muted">Saved as a profile. Activate it to sync to this Tally company. Use the exact names from Tally.</p>
     <div class="two-col">
-      <label>Label (shown in Setuora)<input name="name" placeholder="e.g. Swarnagowri Foods"></label>
+      <label>Label (shown in Master)<input name="name" placeholder="e.g. Swarnagowri Foods"></label>
       <label>Tally company name<input name="company_name" required></label>
     </div>
     <div class="two-col">
@@ -94,7 +94,7 @@
       <label>Company name<input name="company_name" value="{{ settings.company_name }}" required></label>
       <label class="checkline">
         <input type="checkbox" name="tally_enabled" value="true" data-no-autosave {{ 'checked' if settings.tally_enabled == 'true' else '' }}>
-        Automatically sync completed purchases and sales with Tally
+        Automatically sync eligible purchase and sale events received from franchises with Tally
         <small class="muted" style="display:inline">- saved only with the button below; pending syncs retry in the background</small>
       </label>
       <div class="two-col">
@@ -134,4 +134,5 @@
     if (dialog.dataset.open === "true") open();
   })();
 </script>
+<script src="/static/autosave.js?v=20260729-master-1"></script>
 {% endblock %}

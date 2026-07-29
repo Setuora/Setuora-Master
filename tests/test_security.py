@@ -7,7 +7,12 @@ from app.auth import SESSION_COOKIE, current_user
 from app.config import get_settings
 from app.middleware import SessionActivityMiddleware
 from app.models import User
-from app.security import create_session_token, hash_password, read_session_token, verify_password
+from app.security import (
+    create_session_token,
+    hash_password,
+    read_session_token,
+    verify_password,
+)
 
 
 def test_password_hash_roundtrip():

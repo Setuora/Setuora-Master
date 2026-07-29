@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from app.models import Batch, GstTreatment
-from app.services.inventory import group_batch_items
-
+from app.services.batch_items import grouped_batch_items
 
 TWOPLACES = Decimal("0.01")
 
@@ -69,7 +68,7 @@ def calculate_voucher_summary(batch: Batch) -> VoucherSummary:
         and (getattr(batch, "gst_treatment", None) or "").upper() == GstTreatment.INTER_STATE.value
     )
 
-    for group in group_batch_items(batch):
+    for group in grouped_batch_items(batch):
         product = group["product"]
         quantity = int(group["quantity"])
         rate = money(group.get("rate") or product.default_rate)
@@ -152,13 +151,3 @@ def calculate_voucher_summary(batch: Batch) -> VoucherSummary:
         round_off=round_off,
         final_value=money(final_value),
     )
-
-
-def validate_priced_batch(batch: Batch) -> None:
-    summary = calculate_voucher_summary(batch)
-    if batch.batch_type == "AUDIT":
-        return
-    missing = [line.product_name for line in summary.lines if line.rate <= 0]
-    if missing:
-        names = ", ".join(sorted(set(missing)))
-        raise ValueError(f"Set a positive rate for: {names}")

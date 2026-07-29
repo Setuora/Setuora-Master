@@ -1,9 +1,10 @@
 import secrets
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 
 from app.auth import SESSION_COOKIE
 from app.config import get_settings
@@ -18,6 +19,62 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(self), geolocation=(), microphone=(), payment=(), usb=()",
     "Cross-Origin-Opener-Policy": "same-origin",
 }
+
+
+def _node_api_error(
+    request: Request,
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+) -> JSONResponse:
+    request_id = request.headers.get("x-request-id", "").strip()[:128] or str(uuid4())
+    return JSONResponse(
+        {
+            "data": None,
+            "error": {"code": code, "message": message},
+            "request_id": request_id,
+        },
+        status_code=status_code,
+        headers={"X-Request-ID": request_id},
+    )
+
+
+class NodeAPIBodyLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "POST" and request.url.path == "/api/v1/events":
+            raw_length = request.headers.get("content-length")
+            if raw_length is None:
+                return _node_api_error(
+                    request,
+                    status_code=411,
+                    code="CONTENT_LENGTH_REQUIRED",
+                    message="Content-Length is required.",
+                )
+            try:
+                content_length = int(raw_length)
+            except ValueError:
+                return _node_api_error(
+                    request,
+                    status_code=400,
+                    code="INVALID_CONTENT_LENGTH",
+                    message="Content-Length must be an integer.",
+                )
+            if content_length < 1:
+                return _node_api_error(
+                    request,
+                    status_code=400,
+                    code="BODY_REQUIRED",
+                    message="The event request body is required.",
+                )
+            if content_length > get_settings().node_api_max_body_bytes:
+                return _node_api_error(
+                    request,
+                    status_code=413,
+                    code="BODY_TOO_LARGE",
+                    message="The event request body is too large.",
+                )
+        return await call_next(request)
 
 
 def _authority(value: str | None) -> tuple[str, int | None] | None:
@@ -48,7 +105,11 @@ def _origin(value: str | None) -> tuple[str, str, int] | None:
 
 class CSRFOriginMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method not in SAFE_METHODS:
+        # Node endpoints use an Authorization bearer credential rather than the
+        # browser session cookie.  Same-origin CSRF checks do not apply to that
+        # machine-to-machine boundary.
+        is_node_api = request.url.path.startswith("/api/v1/")
+        if request.method not in SAFE_METHODS and not is_node_api:
             source = request.headers.get("origin") or request.headers.get("referer")
             source_origin = _origin(source)
             expected = request.headers.get("x-forwarded-host") or request.headers.get("host")

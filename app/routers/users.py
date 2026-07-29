@@ -5,7 +5,20 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_permission, require_user
 from app.database import get_db
-from app.models import Batch, InventoryTransaction, Role, ScanLog, Serial, StockRelocation, TallyMasterConfirmation, User, serialize_role_values, utc_now
+from app.models import (
+    Batch,
+    InventoryTransaction,
+    Role,
+    ScanLog,
+    Serial,
+    StockRelocation,
+    TallyMasterConfirmation,
+    User,
+    has_role,
+    normalize_role_values,
+    serialize_role_values,
+    utc_now,
+)
 from app.security import MIN_PASSWORD_LENGTH, hash_password
 from app.services.change_audit import record_change
 from app.services.settings import list_companies
@@ -30,11 +43,14 @@ def _users_context(
     users = db.scalars(
         select(User).where(User.deleted_at.is_(None)).order_by(User.username)
     ).all()
+    roles = [Role.DIRECTORS, Role.ADMIN]
+    if has_role(current, Role.SUPER_ADMIN):
+        roles.append(Role.SUPER_ADMIN)
     return {
         "request": request,
         "user": current,
         "users": users,
-        "roles": list(Role),
+        "roles": roles,
         "companies": list_companies(db),
         "error": error,
         "success": success,
@@ -52,6 +68,8 @@ def users_page(request: Request, error: str = "", success: str = "", db: Session
         "password_mismatch": "Password and confirmation do not match.",
         "user_not_found": "User account was not found.",
         "role_required": "Select at least one role.",
+        "role_invalid": "Master users may only have directors, admin, or super admin roles.",
+        "role_forbidden": "Only a super admin can create another super admin.",
         "tally_access_super_admin": "Super admins always have access to all Tally data.",
     }.get(error, error)
     success_message = {
@@ -80,6 +98,19 @@ def create_user(
     db: Session = Depends(get_db),
 ):
     user = require_permission(request, db, "users_manage")
+    selected_roles = set(normalize_role_values(role))
+    allowed_roles = {
+        Role.DIRECTORS.value,
+        Role.ADMIN.value,
+        Role.SUPER_ADMIN.value,
+    }
+    if not selected_roles.issubset(allowed_roles):
+        return RedirectResponse("/users?error=role_invalid", status_code=303)
+    if (
+        Role.SUPER_ADMIN.value in selected_roles
+        and not has_role(user, Role.SUPER_ADMIN)
+    ):
+        return RedirectResponse("/users?error=role_forbidden", status_code=303)
     role_value = serialize_role_values(role)
     if not role_value:
         return RedirectResponse("/users?error=role_required", status_code=303)

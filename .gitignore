@@ -16,9 +16,6 @@ data/secret_key
 .coverage
 htmlcov/
 logs/
-docs/context/*.zip
-docs/context/*.7z
-docs/context/*.rar
 CLAUDE.md
 deployment/caddy/caddy.exe
 deployment/caddy/Caddyfile

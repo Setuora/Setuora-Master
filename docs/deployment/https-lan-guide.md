@@ -1,63 +1,70 @@
-# LAN HTTPS Guide
+# Private Administrative HTTPS
 
-Phone cameras usually require HTTPS unless the site is opened as `localhost`. For staff phones on the factory LAN, run a local reverse proxy in front of FastAPI.
+This guide covers the private Master administrative site. It is separate from
+the public Node Sync hostname.
 
-## Recommended Shape
-
-```text
-Phone browser
-  -> https://setuora.local
-  -> Caddy
-  -> http://127.0.0.1:8000
-  -> FastAPI
-```
-
-## Caddy
-
-The easiest Windows path is:
-
-1. Run `Setuora.exe setup` as Administrator, or right-click `scripts\setup.bat`
-   and choose **Run as administrator**.
-2. Confirm the detected LAN IP address, or enter a local DNS name.
-3. Install `deployment\caddy\setuora-caddy-root.crt` as a trusted CA certificate
-   on every staff phone and laptop.
-
-Setup installs Caddy through WinGet, generates and validates the Caddyfile,
-registers the auto-start `SetuoraCaddy` service, and permits LAN traffic on ports
-80 and 443. Pass `-SkipCaddy` when running setup if HTTPS is managed separately.
-
-For a manual installation, use `deployment/caddy/Caddyfile.example` as the
-starting point and replace `setuora.local` with the real LAN hostname or static IP.
-
-Keep FastAPI bound to localhost behind the proxy:
+## Boundary
 
 ```text
-scripts\start_setuora.bat
+Administrator
+  -> authenticated private network
+  -> private HTTPS proxy
+  -> Uvicorn 127.0.0.1:8000
 ```
 
-or:
+The private proxy may serve login, monitoring, reports, Tally settings, and
+maintenance. It must not be reachable from the public Internet.
 
-```powershell
-.\.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000
-```
+The public edge has a different configuration and publishes only the Node Sync
+API. See [master-internet-edge.md](master-internet-edge.md) and
+[`Caddyfile.master.example`](../../deployment/caddy/Caddyfile.master.example).
 
-## Certificate
+## Automated private proxy
 
-The automated setup uses Caddy's internal certificate authority and exports its
-public root certificate to `deployment\caddy\setuora-caddy-root.crt`. Install that
-certificate as a trusted CA on each phone. Back up `deployment\caddy\state`, but
-never distribute it because it contains private keys.
+`Setuora.exe setup` can install Caddy, generate an internal-certificate
+configuration, and create a local-subnet firewall rule. Use this only on a
+trusted management network.
 
-For a manual deployment, Caddy's `tls internal` can provide the same local CA,
-or you can configure certificates from another trusted certificate tool.
-
-The deployment should remain LAN-only unless the client explicitly asks for remote access.
-
-Automated setup sets the following value in `.env` and restarts an existing
-Setuora service. For manual setup, set it yourself and restart Setuora:
+Setup also writes:
 
 ```text
 SESSION_COOKIE_SECURE=true
+TRUSTED_HOSTS=<private-admin-host>,127.0.0.1,localhost,testserver
 ```
 
-Leave it `false` while testing over plain `http://127.0.0.1:8000`, otherwise the browser will not send the login cookie over HTTP.
+Review `TRUSTED_HOSTS`; do not use wildcards.
+
+## Certificate handling
+
+The automated private proxy uses Caddy's internal certificate authority. Install
+only its public root certificate on managed administrator devices. Never copy
+the Caddy state directory because it contains private keys.
+
+Prefer an organization-managed certificate and DNS name when available.
+
+## Firewall
+
+- Keep Uvicorn bound to loopback.
+- Permit private HTTPS only from the management subnet or VPN.
+- Deny public access to the administrative hostname.
+- Never expose Tally or the database.
+- Keep the Caddy administration endpoint on loopback.
+
+## Validation
+
+From an approved administrator device:
+
+1. verify the certificate chain and hostname;
+2. sign in and sign out;
+3. confirm secure session cookies;
+4. confirm security headers;
+5. verify that an unapproved network cannot connect.
+
+From the public Internet, verify that the private administrative hostname is not
+reachable and that the public sync hostname rejects every non-Node-Sync path.
+
+## Important distinction
+
+The internal-certificate setup is convenient for the bounded pilot. It does not
+provide publicly trusted TLS for Lite nodes and must not be adapted into a
+direct Internet port-forward.

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 from datetime import timedelta
-import logging
 
 from fastapi import FastAPI
 from sqlalchemy import or_, select
@@ -12,8 +12,11 @@ from sqlalchemy.orm import selectinload
 from app.database import SessionLocal
 from app.models import Batch, BatchItem, BatchStatus, Serial, utc_now
 from app.services.settings import get_all_settings, is_tally_enabled
-from app.services.tally import SYNC_LEASE_MINUTES, TALLY_XML_SUPPORTED_BATCH_TYPES, sync_batch
-
+from app.services.tally import (
+    SYNC_LEASE_MINUTES,
+    TALLY_XML_SUPPORTED_BATCH_TYPES,
+    sync_batch,
+)
 
 WORKER_STATE_KEY = "setuora_retry_worker_task"
 logger = logging.getLogger("setuora")

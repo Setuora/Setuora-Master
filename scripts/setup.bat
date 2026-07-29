@@ -270,7 +270,6 @@ function Write-EnvFile {
         Write-Host "Existing data\setuora.db found. Changing bootstrap admin details will not change existing users." -ForegroundColor Yellow
     }
 
-    $appName = Read-Default "App display name" "Setuora QR Tally Bridge"
     $adminUser = Read-Default "First admin username" "admin"
     $adminPassword = Read-Password $adminUser
     $sessionTimeout = Read-Default "Login session timeout in minutes" "480"
@@ -280,7 +279,8 @@ function Write-EnvFile {
 
     $secureCookieText = if ($secureCookie) { "true" } else { "false" }
     $lines = @(
-        "APP_NAME=$appName",
+        "SETUORA_APP_MODE=master",
+        "APP_NAME=Setuora Master",
         "APP_SECRET_KEY=$secret",
         "DATABASE_URL=$databaseUrl",
         "SESSION_TIMEOUT_MINUTES=$sessionTimeout",
@@ -645,7 +645,7 @@ function Install-CaddyService {
             -MethodName Change `
             -Arguments @{
                 PathName = $serviceCommand
-                DisplayName = "Setuora Caddy HTTPS Proxy"
+                DisplayName = "Setuora Master Caddy HTTPS Proxy"
                 StartMode = "Automatic"
                 StartName = $CaddyServiceStartName
                 StartPassword = $null
@@ -658,7 +658,7 @@ function Install-CaddyService {
             -MethodName Create `
             -Arguments @{
                 Name = $CaddyServiceName
-                DisplayName = "Setuora Caddy HTTPS Proxy"
+                DisplayName = "Setuora Master Caddy HTTPS Proxy"
                 PathName = $serviceCommand
                 # Win32_Service.Create declares ServiceType as CIM UInt8. An
                 # uncast PowerShell integer is Int32, which Invoke-CimMethod
@@ -675,7 +675,7 @@ function Install-CaddyService {
     # write only its own certificate state; the app service gets separate access.
     Grant-LocalServiceAccess -Path $CaddyDir -Access "RX"
 
-    & sc.exe description $CaddyServiceName "HTTPS reverse proxy for Setuora QR Tally Bridge" | Out-Null
+    & sc.exe description $CaddyServiceName "HTTPS reverse proxy for Setuora Master" | Out-Null
     & sc.exe config $CaddyServiceName start= auto | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not configure the Caddy service to start automatically with Windows."
@@ -1001,7 +1001,7 @@ if ((Test-Path $VenvPython) -or $Repair) {
         $existingSetuoraService.Status -ne "Stopped" -and
         -not (Test-AdminShell)
     ) {
-        throw "Setuora is running as a Windows service. Right-click scripts\setup.bat, choose 'Run as administrator', and try again."
+        throw "Setuora Master is running as a Windows service. Right-click scripts\setup.bat, choose 'Run as administrator', and try again."
     }
 
     & $StopScript -ProjectDir $ProjectRoot
@@ -1031,6 +1031,8 @@ if ($Repair -and (Test-Path $EnvPath)) {
 else {
     $credentials = Ensure-EnvFile
 }
+Set-EnvSetting -Name "SETUORA_APP_MODE" -Value "master"
+Set-EnvSetting -Name "APP_NAME" -Value "Setuora Master"
 
 Write-Section "Smoke Test"
 & $VenvPython -c "import uvicorn; from app.main import app; print('App import OK')"
@@ -1074,21 +1076,21 @@ else {
 
 if ($serviceInstalled) {
     Set-CaddyAppServiceDependency
-    Start-ManagedService -Name $AppServiceName -DisplayName "Setuora" -IncludeSetuoraLog
+    Start-ManagedService -Name $AppServiceName -DisplayName "Setuora Master" -IncludeSetuoraLog
     $installedCaddyService = Get-Service -Name $CaddyServiceName -ErrorAction SilentlyContinue
     if ($installedCaddyService) {
-        Start-ManagedService -Name $CaddyServiceName -DisplayName "Setuora Caddy HTTPS proxy"
+        Start-ManagedService -Name $CaddyServiceName -DisplayName "Setuora Master Caddy HTTPS proxy"
         $startupCaddyAddress = Get-CaddyAddress
         if (-not $startupCaddyAddress) {
             throw "Caddy is installed, but no HTTPS address could be read from '$Caddyfile'."
         }
     }
     else {
-        Write-Host "Setuora is running, but Caddy is not installed; phone and laptop HTTPS access is unavailable." -ForegroundColor Yellow
+        Write-Host "Setuora Master is running, but Caddy is not installed; private HTTPS access is unavailable." -ForegroundColor Yellow
     }
-    Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health" -DisplayName "Setuora local health check"
+    Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health" -DisplayName "Setuora Master local health check"
     if ($installedCaddyService) {
-        Wait-HealthEndpoint -Uri "https://$startupCaddyAddress/health" -DisplayName "Setuora Caddy HTTPS"
+        Wait-HealthEndpoint -Uri "https://$startupCaddyAddress/health" -DisplayName "Setuora Master Caddy HTTPS"
     }
 }
 

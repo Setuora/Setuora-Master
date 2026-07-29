@@ -3,13 +3,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.auth import SESSION_COOKIE
 from app.config import get_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models import User
-from app.security import create_session_token, hash_password, verify_password
+from app.security import hash_password, verify_password
 from app.services.bootstrap import bootstrap
+from tests.factories import authenticate_client
 
 
 def test_bootstrap_requires_a_non_default_first_admin_password(db_session, monkeypatch):
@@ -68,7 +68,8 @@ def _client_with_user(must_change=True):
 def test_must_change_password_gate_redirects_protected_route():
     client, Session, engine = _client_with_user(must_change=True)
     try:
-        response = client.get("/", cookies={SESSION_COOKIE: create_session_token(1)})
+        authenticate_client(client, 1)
+        response = client.get("/")
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
@@ -79,6 +80,7 @@ def test_must_change_password_gate_redirects_protected_route():
 def test_change_password_clears_flag_and_updates_hash():
     client, Session, engine = _client_with_user(must_change=True)
     try:
+        authenticate_client(client, 1)
         response = client.post(
             "/account/password",
             data={
@@ -86,7 +88,6 @@ def test_change_password_clears_flag_and_updates_hash():
                 "new_password": "a-strong-new-pass",
                 "confirm_password": "a-strong-new-pass",
             },
-            cookies={SESSION_COOKIE: create_session_token(1)},
         )
         with Session() as db:
             user = db.get(User, 1)
@@ -102,10 +103,10 @@ def test_change_password_clears_flag_and_updates_hash():
 def test_change_password_rejects_short_password():
     client, Session, engine = _client_with_user(must_change=True)
     try:
+        authenticate_client(client, 1)
         response = client.post(
             "/account/password",
             data={"current_password": "admin123", "new_password": "short", "confirm_password": "short"},
-            cookies={SESSION_COOKIE: create_session_token(1)},
         )
     finally:
         app.dependency_overrides.clear()

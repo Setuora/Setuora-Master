@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Network - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Control plane</p>
+    <h1>Franchise network</h1>
+    <p class="muted">Live ownership, transfer, and Tally queue state received from Setuora Lite.</p>
+  </div>
+  {% if has_role(user, 'super_admin', 'admin') %}
+  <a class="button primary" href="/franchises">Manage franchises</a>
+  {% endif %}
+</section>
+
+<section class="metric-grid dashboard-metric-grid">
+  <article class="metric"><span>Active franchises</span><strong>{{ counts.franchises }}</strong></article>
+  <article class="metric"><span>Online now</span><strong>{{ counts.online }}</strong></article>
+  <article class="metric"><span>In stock</span><strong>{{ counts.in_stock }}</strong></article>
+  <article class="metric warn"><span>In transit</span><strong>{{ counts.in_transit }}</strong></article>
+  <article class="metric warn"><span>Pending Tally</span><strong>{{ counts.pending_tally }}</strong></article>
+  <article class="metric danger"><span>Failed Tally</span><strong>{{ counts.failed_tally }}</strong></article>
+  <article class="metric warn"><span>Open transfers</span><strong>{{ counts.open_transfers }}</strong></article>
+</section>
+
+<section class="panel">
+  <div class="section-title">
+    <div><p class="eyebrow">Node health</p><h2>Franchises</h2></div>
+    <span>Offline threshold is configured on Master.</span>
+  </div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Franchise</th><th>Location</th><th>Connection</th><th>Last sequence</th><th>Last seen</th><th>Current stock</th></tr></thead>
+      <tbody>
+        {% for node, stock_count in stock_by_node %}
+        <tr>
+          <td><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
+          <td>{{ node.location }}</td>
+          <td><span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Online' if online_by_id[node.id] else 'Offline' }}</span></td>
+          <td>{{ node.last_sequence }}</td>
+          <td>{{ node.last_seen_at|report_date if node.last_seen_at else 'Never' }}</td>
+          <td>{{ stock_count }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty">No franchise has been enrolled.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="split">
+  <article class="panel split-card">
+    <div class="section-title"><h2>Recent movements</h2>{% if has_role(user, 'super_admin', 'admin') %}<a href="/network/events">View all</a>{% endif %}</div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Franchise</th><th>Event</th><th>Reference</th></tr></thead>
+        <tbody>
+          {% for event in recent_events %}
+          <tr>
+            <td>{{ event.occurred_at|report_date }}</td>
+            <td>{{ event.franchise.code }}</td>
+            <td>{% if has_role(user, 'super_admin', 'admin') %}<a href="/network/events/{{ event.event_id }}">{{ event.event_type|replace('_', ' ')|title }}</a>{% else %}{{ event.event_type|replace('_', ' ')|title }}{% endif %}</td>
+            <td>{{ event.reference or '—' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty">No movements received yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel split-card">
+    <div class="section-title"><h2>Recent transfers</h2><a href="/network/transfers">View all</a></div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Reference</th><th>Route</th><th>Status</th><th>Items</th></tr></thead>
+        <tbody>
+          {% for transfer in recent_transfers %}
+          <tr>
+            <td><a href="/network/transfers/{{ transfer.public_id }}">{{ transfer.reference }}</a></td>
+            <td>{{ transfer.source_franchise.code }} → {{ transfer.destination_franchise.code }}</td>
+            <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></td>
+            <td>{{ transfer.items|length }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty">No franchise transfers yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

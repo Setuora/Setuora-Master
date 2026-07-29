@@ -1,13 +1,18 @@
 import asyncio
-from contextlib import suppress
 import os
 import sqlite3
+from contextlib import suppress
 from types import SimpleNamespace
 
 import app.services.backup as backup_service
 import app.services.backup_worker as backup_worker
 from app.config import get_settings
-from app.services.backup import create_scheduled_backup, create_sqlite_backup, sqlite_database_path, verify_sqlite_backup
+from app.services.backup import (
+    create_scheduled_backup,
+    create_sqlite_backup,
+    sqlite_database_path,
+    verify_sqlite_backup,
+)
 
 
 def test_backup_worker_start_replaces_finished_task(monkeypatch):
@@ -37,18 +42,6 @@ def test_backup_worker_start_replaces_finished_task(monkeypatch):
             await replacement
 
     asyncio.run(scenario())
-
-
-def _create_minimal_setuora_database(path, marker: str):
-    connection = sqlite3.connect(path)
-    connection.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
-    connection.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
-    connection.execute("CREATE TABLE marker (value TEXT)")
-    connection.execute("INSERT INTO users (username) VALUES ('admin')")
-    connection.execute("INSERT INTO settings (key, value) VALUES ('company_name', 'Setuora')")
-    connection.execute("INSERT INTO marker (value) VALUES (?)", (marker,))
-    connection.commit()
-    connection.close()
 
 
 def test_create_sqlite_backup_uses_configured_database(tmp_path, monkeypatch):
@@ -172,57 +165,3 @@ def test_update_backup_settings_persists_env_and_refreshes_runtime(tmp_path, mon
     assert os.environ["BACKUP_RETENTION_COUNT"] == "7"
     assert get_settings().backup_retention_count == 7
     get_settings.cache_clear()
-
-
-def test_verify_setuora_backup_rejects_non_setuora_sqlite(tmp_path):
-    other = tmp_path / "other.db"
-    connection = sqlite3.connect(other)
-    connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
-    connection.commit()
-    connection.close()
-
-    try:
-        backup_service.verify_setuora_backup(other)
-    except RuntimeError as exc:
-        assert "not a Setuora" in str(exc)
-    else:
-        raise AssertionError("Expected non-Setuora SQLite database to be rejected")
-
-
-def test_restore_sqlite_backup_replaces_database_and_keeps_safety_backup(tmp_path, monkeypatch):
-    current_db = tmp_path / "setuora.db"
-    backup_dir = tmp_path / "backups"
-    backup_dir.mkdir()
-    restore_source = backup_dir / "setuora-backup-old.db"
-    _create_minimal_setuora_database(current_db, "current")
-    _create_minimal_setuora_database(restore_source, "restored")
-    os.utime(restore_source, (1, 1))
-
-    monkeypatch.setattr(
-        backup_service,
-        "get_settings",
-        lambda: SimpleNamespace(
-            database_url=f"sqlite:///{current_db}",
-            backup_directory=str(backup_dir),
-            backup_offsite_directory="",
-            backup_retention_count=1,
-        ),
-    )
-
-    restore = backup_service.restore_sqlite_backup_file(restore_source, reload_runtime=False)
-
-    connection = sqlite3.connect(current_db)
-    try:
-        marker = connection.execute("SELECT value FROM marker").fetchone()[0]
-    finally:
-        connection.close()
-    safety = sqlite3.connect(restore.safety_backup_path)
-    try:
-        safety_marker = safety.execute("SELECT value FROM marker").fetchone()[0]
-    finally:
-        safety.close()
-
-    assert marker == "restored"
-    assert safety_marker == "current"
-    assert restore.safety_backup_path.exists()
-    assert restore_source.exists() is False

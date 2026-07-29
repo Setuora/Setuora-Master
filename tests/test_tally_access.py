@@ -12,7 +12,6 @@ from app.services.tally_access import (
 from app.services.tally_cache import replace_cached_ledgers
 from app.services.tally_masters import TallyLedger, TallySalesVoucher
 
-
 COMPANY_CONFIG = {
     "company_name": "Tally Company",
     "tally_host": "127.0.0.1",

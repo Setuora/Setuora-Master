@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 from app.auth import require_permission, require_user
 from app.database import get_db
 from app.models import Company, Role
-from app.services.access_control import ROLE_COLUMNS, config_from_form, role_access_sections, save_role_access_config
+from app.services.access_control import (
+    ROLE_COLUMNS,
+    config_from_form,
+    role_access_sections,
+    save_role_access_config,
+)
 from app.services.change_audit import record_change
 from app.services.settings import (
     DEFAULT_SETTINGS,

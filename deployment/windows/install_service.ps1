@@ -86,6 +86,8 @@ elseif ($existingService.Status -ne "Stopped") {
 }
 
 Invoke-Nssm set $ServiceName Application $pythonExe
+Invoke-Nssm set $ServiceName DisplayName "Setuora Master"
+Invoke-Nssm set $ServiceName Description "Setuora Master monitoring and Tally synchronization service"
 Invoke-Nssm set $ServiceName AppParameters "-m uvicorn app.main:app --host 127.0.0.1 --port $Port"
 Invoke-Nssm set $ServiceName AppDirectory $ProjectDir
 Invoke-Nssm set $ServiceName AppStdout (Join-Path $logDir "setuora-out.log")

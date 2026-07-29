@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Franchises - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Node administration</p>
+    <h1>Franchises</h1>
+    <p class="muted">Each Lite server receives its own revocable credential.</p>
+  </div>
+</section>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if api_key %}
+<div class="alert success">
+  <strong>Copy this API key now. It will not be shown again.</strong>
+  <code class="secret-once">{{ api_key }}</code>
+</div>
+{% endif %}
+
+<section class="panel">
+  <div class="section-title"><h2>Enroll franchise</h2><span>Choose the permanent code before any production QR is generated.</span></div>
+  <form method="post" action="/franchises" class="grid-form compact">
+    <label>Permanent code<input name="code" maxlength="40" placeholder="BLR-01" required></label>
+    <label>Franchise name<input name="name" maxlength="180" required></label>
+    <label>Location<input name="location" maxlength="180" required></label>
+    <label>Tally godown (optional)<input name="tally_godown_name" maxlength="180"></label>
+    <button class="button primary" type="submit">Enroll and create key</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Enrolled nodes</h2><span>Rotating a key revokes every previous active key immediately.</span></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Franchise</th><th>Location</th><th>Connection</th><th>Sequence</th><th>Tally godown</th><th>Credentials</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for node in nodes %}
+        <tr>
+          <td><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
+          <td>{{ node.location }}</td>
+          <td>
+            <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Online' if online_by_id[node.id] else 'Offline' }}</span>
+            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'Never connected' }}</small>
+          </td>
+          <td>{{ node.last_sequence }}</td>
+          <td>{{ node.tally_godown_name or 'Not mapped' }}</td>
+          <td>{{ node.credentials|length }} issued</td>
+          <td>
+            {% if node.active %}
+            <form method="post" action="/franchises/{{ node.public_id }}/credentials">
+              <button class="button small" type="submit">Rotate key</button>
+            </form>
+            <form method="post" action="/franchises/{{ node.public_id }}/status">
+              <input type="hidden" name="active" value="false">
+              <button class="button small danger" type="submit">Deactivate</button>
+            </form>
+            {% else %}
+            <form method="post" action="/franchises/{{ node.public_id }}/status">
+              <input type="hidden" name="active" value="true">
+              <button class="button small" type="submit">Reactivate</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">No franchise has been enrolled.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

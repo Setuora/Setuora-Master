@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_DIR = PROJECT_ROOT / "scripts"
 
@@ -65,12 +64,52 @@ def test_setup_has_a_data_preserving_repair_mode():
     assert "The virtual environment is damaged or incompatible. Rebuilding it" in setup_script
     assert "& $VenvPython -m pytest -q" in setup_script
     assert "Get-SetuoraServerLaunchInfo" in setup_script
-    assert 'Start-ManagedService -Name $AppServiceName -DisplayName "Setuora"' in setup_script
+    assert 'Start-ManagedService -Name $AppServiceName -DisplayName "Setuora Master"' in setup_script
+
+
+def test_setup_enforces_master_edition_and_branding():
+    setup_script = (WORKFLOWS_DIR / "setup.bat").read_text(encoding="utf-8")
+    start_helper = (
+        PROJECT_ROOT / "deployment" / "windows" / "start_setuora.ps1"
+    ).read_text(encoding="utf-8")
+    stop_script = (WORKFLOWS_DIR / "stop_setuora.bat").read_text(encoding="utf-8")
+    preflight = (
+        PROJECT_ROOT / "deployment" / "windows" / "production_preflight.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert '"SETUORA_APP_MODE=master"' in setup_script
+    assert '"APP_NAME=Setuora Master"' in setup_script
+    assert 'Set-EnvSetting -Name "SETUORA_APP_MODE" -Value "master"' in setup_script
+    assert 'Set-EnvSetting -Name "APP_NAME" -Value "Setuora Master"' in setup_script
+    assert "HTTPS reverse proxy for Setuora Master" in setup_script
+    assert "Setuora Master Caddy HTTPS Proxy" in setup_script
+    assert 'Write-Host "Starting Setuora Master..."' in start_helper
+    assert "echo Stopping Setuora Master..." in stop_script
+    assert '$settings["SETUORA_APP_MODE"] -eq "master"' in preflight
+    assert '$settings["APP_NAME"] -eq "Setuora Master"' in preflight
+
+    combined = "\n".join((setup_script, start_helper, stop_script))
+    assert "Setuora QR Tally Bridge" not in combined
+
+
+def test_master_release_preserves_existing_windows_service_name():
+    setup_script = (WORKFLOWS_DIR / "setup.bat").read_text(encoding="utf-8")
+    service_installer = (
+        PROJECT_ROOT / "deployment" / "windows" / "install_service.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert '$AppServiceName = "SetuoraQrTallyBridge"' in setup_script
+    assert '[string]$ServiceName = "SetuoraQrTallyBridge"' in service_installer
+    assert 'Invoke-Nssm set $ServiceName DisplayName "Setuora Master"' in service_installer
 
 
 def test_updater_preserves_clean_diverged_history_before_realigning():
     update_script = (WORKFLOWS_DIR / "update.bat").read_text(encoding="utf-8")
 
+    assert "https://github.com/Setuora/Setuora-Master.git" in update_script
+    assert "https://github\\.com/" in update_script
+    assert "Setuora/Setuora-Master(?:\\.git)?/?$" in update_script
+    assert "Dijo-404/Proj_Setu" not in update_script
     assert "& git pull " not in update_script
     assert "& git rebase " not in update_script
     assert "& git fetch --no-tags origin $branch" in update_script
@@ -238,7 +277,7 @@ def test_service_start_surfaces_the_service_error_log():
     assert "function Get-RecentServiceError" in setup_script
     assert "Recent service log:" in setup_script
     assert (
-        'Start-ManagedService -Name $AppServiceName -DisplayName "Setuora" -IncludeSetuoraLog'
+        'Start-ManagedService -Name $AppServiceName -DisplayName "Setuora Master" -IncludeSetuoraLog'
         in setup_script
     )
 
@@ -299,8 +338,8 @@ def test_setup_configures_and_starts_services_and_caddy_by_default():
     assert '[switch]$ConfigureCaddy' in setup_script
     assert 'Read-YesNo "Install and configure Caddy for HTTPS access from phones and laptops?" $true' in setup_script
     assert 'Read-YesNo "Install Setuora as an automatic Windows service?" $true' in setup_script
-    assert 'Start-ManagedService -Name $AppServiceName -DisplayName "Setuora"' in setup_script
-    assert 'Start-ManagedService -Name $CaddyServiceName -DisplayName "Setuora Caddy HTTPS proxy"' in setup_script
+    assert 'Start-ManagedService -Name $AppServiceName -DisplayName "Setuora Master"' in setup_script
+    assert 'Start-ManagedService -Name $CaddyServiceName -DisplayName "Setuora Master Caddy HTTPS proxy"' in setup_script
     assert 'Read-YesNo "Start Setuora and Caddy now in a new window?" $true' in setup_script
     assert 'Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health"' in setup_script
     assert 'Wait-HealthEndpoint -Uri "https://$startupCaddyAddress/health"' in setup_script

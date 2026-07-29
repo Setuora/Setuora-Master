@@ -1,86 +1,85 @@
-# Tally Integration Guide
+# Master Tally Integration
 
-## Tally Settings
+Setuora Master is the only Setuora edition that may communicate with Tally. Lite
+nodes send events to Master; they do not receive Tally network access or
+credentials.
 
-In Tally Prime:
+## Network boundary
 
-1. Open the target company.
-2. Enable Tally as a server on port `9000`.
-3. Confirm inventory is maintained.
-4. Confirm accounts and inventory are integrated.
+- Run Tally on the Master host or a protected LAN endpoint.
+- Bind or firewall the XML gateway so only Master can reach it.
+- Never publish port `9000`.
+- Keep the database and Tally data directory private.
 
-In Setuora:
+The default private endpoint is:
+
+```text
+http://127.0.0.1:9000
+```
+
+## Configure the pilot company
 
 1. Open `Settings`.
-2. Add or activate the correct company profile.
-3. Enter exact company, voucher type, ledger, GST ledger, round-off ledger, stock item, unit, and party names.
-   When products in the same company use different GST rates, open `Add product ledger`
-   and enter the GST rate, Sales ledger, CGST ledger, SGST ledger, and IGST
-   ledger. Use
-   `Add product ledger` again for every additional GST rate. Products without a
-   matching rate use the default Sales, CGST, and SGST ledgers.
-4. Leave `Automatically sync completed purchases and sales with Tally` off during setup.
-5. Open `Tally Check`.
-6. Open the company profile and click `Load from Tally`. Select a loaded Tally
-   company, review its ledger names and dated Sales Book, then click `Use for sync`
-   and save the profile. Loaded ledger names appear as exact-name choices in the
-   round-off and product GST ledger fields.
-7. Confirm each required master only after comparing exact spelling in Tally.
-8. Use a purchase, sale, or sales-return batch page to download the generated Tally XML.
-9. Validate that XML against the real Tally company.
-10. Enable sync only after validation.
+2. Configure the private Tally host, port, company, voucher types, ledgers, tax
+   ledgers, round-off ledger, and retry interval.
+3. Keep posting disabled.
+4. Open `Tally Check`.
+5. Load the available Tally companies and choose the non-production test
+   company.
+6. Compare every required master name exactly and record the confirmations.
+7. Enable posting only after a controlled event produces the expected voucher
+   and inventory effect.
 
-Changing the active company disables sync again. Recheck that company's masters before posting live vouchers.
+Changing the active company disables posting until the new company is checked.
 
-## Current Posting Support
+## Queue behavior
 
-Live XML posting is supported for:
+Node Sync commits an accepted event and its Master projections before returning
+success. Eligible accounting work is placed in the central queue. The background
+worker posts it later and records request, response, retry, and error details.
 
-- Purchase/receive
-- Sale
-- Sales return as Credit Note
+Node uploads never wait for Tally. A Tally outage therefore does not roll back an
+accepted network event.
 
-These are queued until automatic Tally sync is enabled. Once enabled, every
-completed purchase/receive, sale, and sales-return batch is posted automatically;
-temporary failures are retried in the background.
+The exact event types and current queue effects are defined in
+[Node Sync API v1](../api/node-sync-v1.md).
 
-Manual Tally Excel exports are available only to admin and super-admin users.
+## Franchise mapping gate
 
-The following local workflows are implemented but their Tally XML is intentionally not posted yet:
+The pilot worker currently uses one active global company configuration. That is
+not sufficient for unrestricted multi-franchise accounting.
 
-- Purchase return
-- Issue
+Before enabling network-wide posting, implement and validate:
 
-They remain `PENDING_SYNC` with a clear message until the exact voucher XML is configured.
+- an authoritative franchise-to-company or franchise-to-Godown mapping;
+- reviewed voucher and ledger behavior for every franchise;
+- stable accounting idempotency keys;
+- durable worker leases;
+- duplicate-post reconciliation;
+- a correction process for rejected accounting data;
+- Stock Journal behavior for inter-franchise transfers.
 
-## Required Setuora Fields
+Until those controls pass, use the Tally queue for a controlled test company or
+monitoring only.
 
-Setuora requires these fields before it can generate supported Tally XML:
+## Operational checks
 
-- company name
-- sales voucher type
-- purchase voucher type
-- sales ledger
-- purchase ledger
-- CGST ledger
-- SGST ledger
-- round-off ledger
+When work remains queued:
 
-Product masters must also have exact Tally stock item names and units.
-Enter the exact customer or supplier ledger on each sale, sales-return, purchase, or receive batch.
-For sales and sales returns, enter the debtor ledger as the party name and add the buyer GST
-registration type, GST name, and GST number when available.
+1. confirm Tally is open;
+2. test the private gateway;
+3. confirm the selected company;
+4. review `Tally Check`;
+5. inspect the queue item and its latest attempt;
+6. correct configuration before retrying.
 
-For sale and sales-return vouchers, Setuora selects the Sales, CGST, SGST, and IGST ledgers from each
-product's GST rate. A single voucher can therefore contain products at multiple
-GST rates while posting each amount to the correct ledger. Purchase vouchers
-continue to use the default Purchase, CGST, and SGST ledgers.
+Do not edit an accepted network event to make accounting succeed. Apply a
+reviewed correction through an auditable domain operation.
 
-## Sync Statuses
+## Security
 
-- `PENDING_SYNC`: sync is disabled, settings are incomplete, Tally is unreachable, or the voucher type is not configured for live posting.
-- `FAILED`: Tally responded with a non-retryable error.
-- `SYNCED`: Tally accepted the voucher.
-- `CLOSED`: local-only workflows such as audit or barcode assignment completed without Tally posting.
-
-Admins can open a batch to download XML, review sync attempts, and retry pending or failed supported batches.
+- Restrict raw XML and attempt details to administrators.
+- Redact credentials from logs and support bundles.
+- Back up Tally and Master independently.
+- Test reconciliation after timeout, process termination, and ambiguous gateway
+  responses.

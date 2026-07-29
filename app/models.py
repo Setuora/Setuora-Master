@@ -1,8 +1,20 @@
+import json
 from datetime import date, datetime, timezone
 from enum import Enum
-import json
+from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,6 +28,8 @@ class Role(str, Enum):
     SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
     DIRECTORS = "directors"
+    # These values remain readable for existing databases. Master cannot assign
+    # them and grants them no console access; they belong to Setuora Lite.
     WAREHOUSE_MANAGER = "warehouse_manager"
     PURCHASE = "purchase"
     SALES = "sales"
@@ -85,6 +99,7 @@ class SerialStatus(str, Enum):
     AUDITED = "AUDITED"
     DAMAGED = "DAMAGED"
     MISSING = "MISSING"
+    IN_TRANSIT = "IN_TRANSIT"
     INVALID = "INVALID"
     REPLACED = "REPLACED"
 
@@ -640,3 +655,311 @@ class AuditFinding(Base):
 
     batch: Mapped[Batch] = relationship(back_populates="audit_findings")
     serial: Mapped[Serial | None] = relationship()
+
+
+class TransferStatus(str, Enum):
+    DRAFT = "DRAFT"
+    DISPATCHED = "DISPATCHED"
+    PARTIALLY_RECEIVED = "PARTIALLY_RECEIVED"
+    RECEIVED = "RECEIVED"
+
+
+class FranchiseNode(Base):
+    """A remotely hosted Setuora Lite installation known to this master."""
+
+    __tablename__ = "franchise_nodes"
+    __table_args__ = (
+        CheckConstraint("code = upper(code)", name="ck_franchise_node_code_upper"),
+        CheckConstraint("name = upper(name)", name="ck_franchise_node_name_upper"),
+        CheckConstraint("location = upper(location)", name="ck_franchise_node_location_upper"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        index=True,
+        default=lambda: str(uuid4()),
+    )
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), unique=True, index=True)
+    location: Mapped[str] = mapped_column(String(180), index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    tally_godown_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    last_sequence: Mapped[int] = mapped_column(Integer, default=0)
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    service_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    service_user: Mapped[User | None] = relationship()
+    credentials: Mapped[list["NodeCredential"]] = relationship(
+        back_populates="franchise",
+        cascade="all, delete-orphan",
+    )
+    inbound_events: Mapped[list["InboundEvent"]] = relationship(
+        back_populates="franchise",
+        cascade="all, delete-orphan",
+        foreign_keys="InboundEvent.franchise_id",
+    )
+    commands: Mapped[list["NodeCommand"]] = relationship(
+        back_populates="target_franchise",
+        cascade="all, delete-orphan",
+        foreign_keys="NodeCommand.target_franchise_id",
+    )
+
+
+class NodeCredential(Base):
+    """A revocable node API key; the plaintext secret is never persisted."""
+
+    __tablename__ = "node_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="CASCADE"),
+        index=True,
+    )
+    key_id: Mapped[str] = mapped_column(String(48), unique=True, index=True)
+    secret_hash: Mapped[str] = mapped_column(String(64))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    franchise: Mapped[FranchiseNode] = relationship(back_populates="credentials")
+
+
+class InboundEvent(Base):
+    """Immutable journal entry received from a franchise node."""
+
+    __tablename__ = "inbound_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "franchise_id",
+            "sequence",
+            name="uq_inbound_event_franchise_sequence",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="CASCADE"),
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    schema_version: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(40), index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        index=True,
+    )
+    reference: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    actor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+    payload_hash: Mapped[str] = mapped_column(String(64), index=True)
+    result_json: Mapped[str] = mapped_column(Text)
+    tally_batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("batches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    franchise: Mapped[FranchiseNode] = relationship(
+        back_populates="inbound_events",
+        foreign_keys=[franchise_id],
+    )
+    tally_batch: Mapped[Batch | None] = relationship()
+
+
+class NetworkStock(Base):
+    """Canonical master-side ownership for one globally unique QR serial."""
+
+    __tablename__ = "network_stock"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    serial_id: Mapped[int] = mapped_column(
+        ForeignKey("serials.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+    )
+    current_franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id"),
+        index=True,
+    )
+    origin_franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    last_event_id: Mapped[int] = mapped_column(
+        ForeignKey("inbound_events.id"),
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        index=True,
+    )
+
+    serial: Mapped[Serial] = relationship()
+    current_franchise: Mapped[FranchiseNode] = relationship(
+        foreign_keys=[current_franchise_id],
+    )
+    origin_franchise: Mapped[FranchiseNode] = relationship(
+        foreign_keys=[origin_franchise_id],
+    )
+    last_event: Mapped[InboundEvent] = relationship()
+
+
+class StockTransfer(Base):
+    __tablename__ = "stock_transfers"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_franchise_id",
+            "reference",
+            name="uq_stock_transfer_source_reference",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        index=True,
+        default=lambda: str(uuid4()),
+    )
+    source_franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id"),
+        index=True,
+    )
+    destination_franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id"),
+        index=True,
+    )
+    reference: Mapped[str] = mapped_column(String(180), index=True)
+    status: Mapped[str] = mapped_column(
+        String(40),
+        default=TransferStatus.DRAFT.value,
+        index=True,
+    )
+    dispatch_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inbound_events.id"),
+        nullable=True,
+        unique=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+    received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    source_franchise: Mapped[FranchiseNode] = relationship(
+        foreign_keys=[source_franchise_id],
+    )
+    destination_franchise: Mapped[FranchiseNode] = relationship(
+        foreign_keys=[destination_franchise_id],
+    )
+    dispatch_event: Mapped[InboundEvent | None] = relationship()
+    items: Mapped[list["StockTransferItem"]] = relationship(
+        back_populates="transfer",
+        cascade="all, delete-orphan",
+    )
+
+
+class StockTransferItem(Base):
+    __tablename__ = "stock_transfer_items"
+    __table_args__ = (
+        UniqueConstraint("transfer_id", "serial_id", name="uq_stock_transfer_serial"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    transfer_id: Mapped[int] = mapped_column(
+        ForeignKey("stock_transfers.id", ondelete="CASCADE"),
+        index=True,
+    )
+    serial_id: Mapped[int] = mapped_column(
+        ForeignKey("serials.id"),
+        index=True,
+    )
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    received_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_receipt_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inbound_events.id"),
+        nullable=True,
+    )
+
+    transfer: Mapped[StockTransfer] = relationship(back_populates="items")
+    serial: Mapped[Serial] = relationship()
+    last_receipt_event: Mapped[InboundEvent | None] = relationship()
+
+
+class NodeCommand(Base):
+    """Immutable command payload queued for exactly one franchise node."""
+
+    __tablename__ = "node_commands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        index=True,
+        default=lambda: str(uuid4()),
+    )
+    target_franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="CASCADE"),
+        index=True,
+    )
+    command_type: Mapped[str] = mapped_column(String(60), index=True)
+    payload_json: Mapped[str] = mapped_column(Text)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        index=True,
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    target_franchise: Mapped[FranchiseNode] = relationship(
+        back_populates="commands",
+        foreign_keys=[target_franchise_id],
+    )

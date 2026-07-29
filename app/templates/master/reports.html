@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Network Reports - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">Consolidated monitoring</p><h1>Franchise stock report</h1></div>
+  <a class="button primary" href="/network/reports.csv?franchise={{ filters.franchise }}&start={{ filters.start }}&end={{ filters.end }}">Download CSV</a>
+</section>
+<section class="metric-grid network-report-metrics">
+  <article class="metric"><span>Current stock</span><strong>{{ summary.current_stock }}</strong></article>
+  <article class="metric"><span>Purchased</span><strong>{{ summary.purchased }}</strong></article>
+  <article class="metric"><span>Sold</span><strong>{{ summary.sold }}</strong></article>
+  <article class="metric"><span>Sales returns</span><strong>{{ summary.sales_returns }}</strong></article>
+  <article class="metric"><span>Purchase returns</span><strong>{{ summary.purchase_returns }}</strong></article>
+  <article class="metric"><span>Issued</span><strong>{{ summary.issued }}</strong></article>
+  <article class="metric"><span>Transferred out</span><strong>{{ summary.transferred_out }}</strong></article>
+  <article class="metric"><span>Transferred in</span><strong>{{ summary.transferred_in }}</strong></article>
+</section>
+<section class="panel">
+  <form method="get" class="filters">
+    <label>Franchise<select name="franchise"><option value="">All franchises</option>{% for node in franchises %}<option value="{{ node.code }}" {{ 'selected' if filters.franchise == node.code else '' }}>{{ node.code }} · {{ node.name }}</option>{% endfor %}</select></label>
+    <label>Start<input type="date" name="start" value="{{ filters.start }}"></label>
+    <label>End<input type="date" name="end" value="{{ filters.end }}"></label>
+    <div class="filter-actions"><button class="button primary" type="submit">Apply</button><a class="button ghost" href="/network/reports">Reset</a></div>
+  </form>
+</section>
+<section class="panel">
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Franchise</th><th>Product</th><th>Current stock</th><th>Purchased</th><th>Sold</th><th>Sales return</th><th>Purchase return</th><th>Issued</th><th>Transfer out</th><th>Transfer in</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><strong>{{ row.franchise.code }}</strong><small>{{ row.franchise.name }}</small></td>
+          <td><strong>{{ row.product_name }}</strong><small>{{ row.product_code }}</small></td>
+          <td>{{ row.current_stock }}</td><td>{{ row.purchased }}</td><td>{{ row.sold }}</td><td>{{ row.sales_returns }}</td><td>{{ row.purchase_returns }}</td><td>{{ row.issued }}</td><td>{{ row.transferred_out }}</td><td>{{ row.transferred_in }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty">No centralized inventory data matches these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

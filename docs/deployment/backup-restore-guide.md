@@ -1,68 +1,87 @@
-# Backup and Restore Guide
+# Setuora Master Backup and Recovery
 
-## Backup
+Master backup and recovery must preserve both database state and the sequence
+relationship with every Lite node.
 
-1. Log in as admin.
-2. Open `Maintenance`.
-3. Click `Download backup`.
-4. Store the downloaded `.db` file safely.
+## Pilot backup contents
 
-The backup uses SQLite's backup API, so WAL data is included.
+Protect:
 
-Automatic verified backups run by default every 24 hours into `data/backups/`.
-The app keeps the latest 14 backup files and opens every new backup for SQLite
-integrity and foreign-key checks before retaining it. Super admins can change
-the automatic backup switch, backup folder, schedule, retention count, and
-off-machine copy folder from `Maintenance`. These values are persisted to
-`.env`:
+- the verified SQLite database backup;
+- `.env`, stored separately from the database;
+- the deployed application revision;
+- private proxy configuration and certificates;
+- encrypted operational runbooks and credential records.
+
+Do not copy a live SQLite file with an ordinary file-copy tool. Use the
+application's verified backup operation or SQLite's backup API so committed WAL
+state is included.
+
+## Scheduled backups
+
+The pilot creates verified backups in `data/backups/` by default. Each retained
+file passes SQLite integrity and foreign-key checks.
+
+Configure:
 
 ```text
 AUTOMATIC_BACKUPS_ENABLED=true
 BACKUP_DIRECTORY=./data/backups
-BACKUP_OFFSITE_DIRECTORY=
 BACKUP_INTERVAL_HOURS=24
 BACKUP_RETENTION_COUNT=14
+BACKUP_OFFSITE_DIRECTORY=<encrypted-off-machine-location>
 ```
 
-Set `BACKUP_OFFSITE_DIRECTORY` to another drive or network share for a verified
-off-machine copy. For an additional server-level backup such as Cobian
-Reflector, include the whole project `data/` folder. Do not back up only
-`data/setuora.db` while the app is running, because SQLite may also have active
-`setuora.db-wal` and `setuora.db-shm` sidecar files.
+An off-machine copy is required. Restrict access to backup operators and test
+that retention cannot be silently disabled by the application service account.
 
-Also keep a separate copy of:
+## Recovery prerequisites
 
-```text
-.env
-```
+Before attempting recovery:
 
-The `.env` file contains deployment settings such as the session secret, database URL, bootstrap admin defaults, and cookie security flag. It is not included inside the SQLite backup.
+1. close the public Node Sync edge;
+2. stop the Master application and workers;
+3. preserve the failed database, logs, and application revision;
+4. identify the last acknowledged sequence for every franchise;
+5. select a verified database and matching application build;
+6. prepare the node-cursor reconciliation record.
 
-## Restore
+Replacing the database without cursor reconciliation can strand events already
+acknowledged by Master and invalidate stock ownership.
 
-In-app restore:
+## Controlled recovery
 
-1. Log in as a super admin.
-2. Open `Maintenance`.
-3. Use `Import backup` to restore a listed backup or upload a previous `.db` backup.
-4. Enter the super admin password and type `IMPORT`.
-5. Sign in again with an account from the restored backup.
-6. Check Dashboard, Products, Serials, Reports, and Settings.
+Recover only in an isolated environment:
 
-The import verifies that the file is a Setuora SQLite backup, creates a safety
-backup of the current database, replaces `data/setuora.db`, clears SQLite sidecar
-files, and reconnects the app to the restored database.
+1. install the recorded application revision on a clean host;
+2. recover the environment configuration through the secret-management process;
+3. load the verified database using the reviewed database procedure;
+4. run schema migration checks;
+5. verify database integrity and foreign keys;
+6. compare every Master sequence cursor with the corresponding Lite outbox;
+7. reconcile missing or divergent events through an audited process;
+8. verify franchise, stock, transfer, command, and Tally queue invariants;
+9. test login, health, backup creation, and a non-production Tally company;
+10. reopen one pilot node, observe replay, then reopen the remaining nodes in
+    controlled batches.
 
-Manual restore:
+Never invent sequence values or delete an outbox to make reconciliation pass.
 
-1. Stop the Setuora service or close the app window.
-2. Copy the current `data/` folder to a safe location.
-3. Replace `data/setuora.db` with the backup file.
-4. If a backup set also includes `setuora.db-wal` and `setuora.db-shm`, restore those sidecar files from the same backup point.
-5. Restore `.env` only when moving to a new machine or recovering a lost config.
-6. Start the Setuora service or run `scripts\start_setuora.bat`.
-7. Log in and check Dashboard, Products, Serials, Reports, and Settings.
+## Recovery drill acceptance
 
-Do not perform a manual file replacement while the app is running.
+A drill passes only when:
 
-If the restored database came from another machine, confirm the Tally host, port, company profile, and `SESSION_COOKIE_SECURE` value before staff start scanning.
+- a clean host can run the recovered application;
+- no acknowledged event is silently lost;
+- duplicate replay remains idempotent;
+- stock ownership and transfer states reconcile;
+- queued Tally work does not double-post;
+- old node credentials can be revoked;
+- a new verified backup is created after acceptance;
+- recovery time and recovery point objectives are recorded.
+
+## Production
+
+PostgreSQL production requires native encrypted backups, point-in-time recovery,
+formal migrations, separate database roles, and repeated clean-host drills.
+SQLite backup success is not production approval.

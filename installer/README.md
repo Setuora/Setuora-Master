@@ -1,16 +1,18 @@
-# Setuora Windows Installer
+# Setuora Master Windows Installer
 
-`Setuora.exe` is the single Windows control executable for a Windows 11 server.
-It provides setup, repair, update, start, and stop commands. Setup requests administrator
-access, installs Git for Windows when needed, clones or updates the official
-Setuora repository, and launches the complete `scripts\setup.bat` workflow.
+`Setuora.exe` is the Windows control utility for a Setuora Master pilot host. It
+provides setup, repair, update, start, and stop commands. Setup requests
+administrator access, installs Git for Windows when needed, clones or updates
+the official Setuora Master repository, and launches `scripts\setup.bat`.
 
 The setup workflow installs Python when needed, creates the virtual environment,
 installs Python dependencies, creates or preserves `.env` and application data,
-runs an import smoke test, configures Caddy HTTPS by default, and installs and
-starts automatic Setuora and Caddy Windows services. Repair rebuilds a damaged
-virtual environment, reinstalls verified dependencies, repairs service startup,
-preserves settings and data, runs the full tests, and starts the services.
+runs validation, forces `SETUORA_APP_MODE=master`, configures optional private
+HTTPS, and installs the Windows services. It does not deploy the public Node
+Sync edge, WireGuard, PostgreSQL, an administrative VPN, or Tally. Repair
+rebuilds a damaged virtual environment, reinstalls verified dependencies,
+repairs service startup, preserves settings and data, runs the full tests, and
+starts the services.
 
 ## Build
 
@@ -35,7 +37,7 @@ Windows SmartScreen may therefore ask the operator to confirm that it should run
 ## Options
 
 ```text
-Setuora.exe setup --install-dir C:\Setuora --branch main
+Setuora.exe setup --install-dir C:\Setuora-Master --branch main
 Setuora.exe setup --with-caddy=false
 Setuora.exe repair
 Setuora.exe update

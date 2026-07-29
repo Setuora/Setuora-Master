@@ -68,6 +68,8 @@ Assert-Check (Test-Path -LiteralPath $caddyExe) "Managed Caddy executable was no
 Assert-Check (Test-Path -LiteralPath $caddyfile) "Generated Caddyfile was not found."
 
 $settings = Read-EnvSettings -Path $envPath
+Assert-Check ($settings["SETUORA_APP_MODE"] -eq "master") "SETUORA_APP_MODE must be master."
+Assert-Check ($settings["APP_NAME"] -eq "Setuora Master") "APP_NAME must be Setuora Master."
 Assert-Check ($settings["SESSION_COOKIE_SECURE"] -eq "true") "SESSION_COOKIE_SECURE must be true for HTTPS deployment."
 Assert-Check ($settings.ContainsKey("BOOTSTRAP_ADMIN_PASSWORD")) "BOOTSTRAP_ADMIN_PASSWORD is missing."
 Assert-Check ($settings["BOOTSTRAP_ADMIN_PASSWORD"].Length -ge 8 -and $settings["BOOTSTRAP_ADMIN_PASSWORD"] -ne "admin123") (

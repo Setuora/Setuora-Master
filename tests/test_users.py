@@ -18,6 +18,7 @@ from app.models import (
 from app.routers.users import create_user, users_page
 from app.security import create_session_token, hash_password, verify_password
 from app.services.settings import add_company
+from tests.factories import authenticate_client
 
 
 def make_session():
@@ -63,9 +64,9 @@ def test_super_admin_can_delete_unused_user():
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
-        cookies = {SESSION_COOKIE: create_session_token(1)}
-        page = client.get("/users", cookies=cookies)
-        delete = client.post("/users/2/delete", cookies=cookies)
+        authenticate_client(client, 1)
+        page = client.get("/users")
+        delete = client.post("/users/2/delete")
     finally:
         app.dependency_overrides.clear()
 
@@ -81,7 +82,7 @@ def test_super_admin_can_delete_unused_user():
     assert deleted is None
 
 
-def test_user_creation_accepts_multiple_roles():
+def test_user_creation_accepts_multiple_master_roles():
     engine, Session = make_session()
     with Session() as db:
         db.add(User(id=1, username="root", password_hash="x", role="super_admin", active=True))
@@ -91,7 +92,7 @@ def test_user_creation_accepts_multiple_roles():
             make_request(1, method="POST"),
             username="dual",
             password="dual-pass",
-            role=["purchase", "sales"],
+            role=["directors", "admin"],
             db=db,
         )
         after_page = users_page(make_request(1), db=db)
@@ -99,12 +100,14 @@ def test_user_creation_accepts_multiple_roles():
     engine.dispose()
 
     assert page.status_code == 200
-    assert 'type="checkbox" name="role" value="purchase"' in page.body.decode()
+    assert 'type="checkbox" name="role" value="directors"' in page.body.decode()
+    assert 'type="checkbox" name="role" value="admin"' in page.body.decode()
+    assert 'type="checkbox" name="role" value="purchase"' not in page.body.decode()
     assert response.status_code == 303
     assert response.headers["location"] == "/users"
     assert dual is not None
-    assert dual.role == "purchase,sales"
-    assert "purchase, sales" in after_page.body.decode()
+    assert dual.role == "admin,directors"
+    assert "admin, directors" in after_page.body.decode()
 
 
 def test_user_delete_is_super_admin_only_and_archives_history_user():
@@ -126,12 +129,15 @@ def test_user_delete_is_super_admin_only_and_archives_history_user():
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
-        admin_page = client.get("/users", cookies={SESSION_COOKIE: create_session_token(1)})
-        admin_delete = client.post("/users/3/delete", cookies={SESSION_COOKIE: create_session_token(1)})
-        self_delete = client.post("/users/2/delete", cookies={SESSION_COOKIE: create_session_token(2)})
-        used_delete = client.post("/users/3/delete", cookies={SESSION_COOKIE: create_session_token(2)})
-        after_delete_page = client.get("/users", cookies={SESSION_COOKIE: create_session_token(2)})
-        deleted_session_page = client.get("/users", cookies={SESSION_COOKIE: create_session_token(3)})
+        authenticate_client(client, 1)
+        admin_page = client.get("/users")
+        admin_delete = client.post("/users/3/delete")
+        authenticate_client(client, 2)
+        self_delete = client.post("/users/2/delete")
+        used_delete = client.post("/users/3/delete")
+        after_delete_page = client.get("/users")
+        authenticate_client(client, 3)
+        deleted_session_page = client.get("/users")
     finally:
         app.dependency_overrides.clear()
 
@@ -173,11 +179,10 @@ def test_super_admin_can_reset_another_users_password():
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
-        cookies = {SESSION_COOKIE: create_session_token(1)}
-        page = client.get("/users", cookies=cookies)
+        authenticate_client(client, 1)
+        page = client.get("/users")
         response = client.post(
             "/users/2/password",
-            cookies=cookies,
             data={
                 "new_password": "new-staff-pass",
                 "confirm_password": "new-staff-pass",
@@ -222,25 +227,23 @@ def test_password_reset_is_super_admin_only_and_validates_input():
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
-        admin_page = client.get("/users", cookies={SESSION_COOKIE: create_session_token(1)})
+        authenticate_client(client, 1)
+        admin_page = client.get("/users")
         admin_reset = client.post(
             "/users/3/password",
-            cookies={SESSION_COOKIE: create_session_token(1)},
             data={"new_password": "changed-pass", "confirm_password": "changed-pass"},
         )
+        authenticate_client(client, 2)
         short_reset = client.post(
             "/users/3/password",
-            cookies={SESSION_COOKIE: create_session_token(2)},
             data={"new_password": "short", "confirm_password": "short"},
         )
         mismatch_reset = client.post(
             "/users/3/password",
-            cookies={SESSION_COOKIE: create_session_token(2)},
             data={"new_password": "changed-pass", "confirm_password": "different-pass"},
         )
         self_reset = client.post(
             "/users/2/password",
-            cookies={SESSION_COOKIE: create_session_token(2)},
             data={"new_password": "changed-pass", "confirm_password": "changed-pass"},
         )
     finally:
@@ -311,18 +314,17 @@ def test_users_menu_assigns_company_ledger_and_tally_user_access():
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
-        cookies = {SESSION_COOKIE: create_session_token(1)}
-        before = client.get("/users", cookies=cookies)
+        authenticate_client(client, 1)
+        before = client.get("/users")
         saved = client.post(
             "/users/2/tally-access",
-            cookies=cookies,
             data={
                 "company_id": str(company_id),
                 "ledger_id": str(ledger_id),
                 "tally_user": f"{company_id}:operator-a",
             },
         )
-        after = client.get("/users", cookies=cookies)
+        after = client.get("/users")
     finally:
         app.dependency_overrides.clear()
 

@@ -4,7 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Role, User, has_any_role, normalize_role_values
 from app.security import read_session_token
-from app.services.access_control import configured_role_has_access, get_role_access_config
+from app.services.access_control import (
+    configured_role_has_access,
+    get_role_access_config,
+)
 
 SESSION_COOKIE = "setuora_session"
 
@@ -54,6 +57,3 @@ def get_user_by_username(db: Session, username: str) -> User | None:
 
 
 ADMIN_ROLES = {Role.ADMIN, Role.SUPER_ADMIN}
-PURCHASE_ROLES = {Role.PURCHASE, Role.ADMIN, Role.SUPER_ADMIN}
-SALES_ROLES = {Role.SALES, Role.ADMIN, Role.SUPER_ADMIN}
-AUDIT_ROLES = {Role.AUDITOR, Role.ADMIN, Role.SUPER_ADMIN}

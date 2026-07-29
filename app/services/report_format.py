@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
-
 
 IST = timezone(timedelta(hours=5, minutes=30))
 REPORT_DATE_FORMAT = "%d-%m-%Y"
-EXCEL_DATE_FORMAT = "DD-MM-YYYY"
 
 
 def report_date(value: object) -> str:
@@ -22,34 +18,6 @@ def report_date(value: object) -> str:
         if parsed:
             return report_date(parsed)
     return str(value)
-
-
-def batch_voucher_number(batch: Any, override: str | None = None) -> int | str:
-    fallback = getattr(batch, "id", "") or ""
-    return numeric_voucher_number(
-        override,
-        getattr(batch, "tally_voucher_number", None),
-        getattr(batch, "batch_number", None),
-        fallback=fallback,
-    )
-
-
-def numeric_voucher_number(*values: object, fallback: object = "") -> int | str:
-    for value in values:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if not text:
-            continue
-        if text.isdecimal():
-            return int(text)
-        match = re.search(r"(\d+)$", text)
-        if match:
-            return int(match.group(1))
-    if isinstance(fallback, int):
-        return fallback
-    fallback_text = str(fallback).strip()
-    return int(fallback_text) if fallback_text.isdecimal() else fallback_text
 
 
 def _local_datetime(value: datetime) -> datetime:

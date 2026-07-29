@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import os
-from pathlib import Path
 import shutil
 import sqlite3
-from tempfile import TemporaryDirectory
 import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from app.config import PROJECT_ROOT, get_settings
-
 
 ENV_FILE = PROJECT_ROOT / ".env"
 BACKUP_ENV_KEYS = (
@@ -52,14 +51,6 @@ class BackupStatus:
     backup_files: tuple[Path, ...]
 
 
-@dataclass(frozen=True)
-class RestoreInfo:
-    restored_path: Path
-    safety_backup_path: Path
-    source_path: Path
-    restored_at: datetime
-
-
 def sqlite_database_path() -> Path:
     url = get_settings().database_url
     if not url.startswith("sqlite:///"):
@@ -90,23 +81,6 @@ def verify_sqlite_backup(path: Path) -> None:
         raise RuntimeError(f"SQLite backup verification failed for {path}: {exc}") from exc
     finally:
         connection.close()
-
-
-def verify_setuora_backup(path: Path) -> None:
-    verify_sqlite_backup(path)
-    connection = sqlite3.connect(path)
-    try:
-        tables = {
-            row[0]
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
-    finally:
-        connection.close()
-    missing = {"users", "settings"} - tables
-    if missing:
-        raise RuntimeError("Backup is a valid SQLite file, but it is not a Setuora database backup.")
 
 
 def _copy_sqlite_database(source_path: Path, destination_path: Path) -> None:
@@ -258,55 +232,6 @@ def list_backup_files() -> list[Path]:
     return sorted(files, key=lambda path: path.stat().st_mtime, reverse=True)
 
 
-def backup_choice_path(value: str) -> Path:
-    requested = Path(value).expanduser().resolve()
-    choices = {path.resolve(): path for path in list_backup_files()}
-    if requested not in choices:
-        raise RuntimeError("Choose a backup from the configured backup folders.")
-    return choices[requested]
-
-
-def restore_sqlite_backup_file(source_path: Path, *, reload_runtime: bool = True) -> RestoreInfo:
-    with _SQLITE_FILE_MAINTENANCE_LOCK:
-        source = source_path.expanduser().resolve()
-        database_path = sqlite_database_path()
-        if not database_path.exists():
-            raise RuntimeError("SQLite database file does not exist yet")
-        verify_setuora_backup(source)
-
-        with TemporaryDirectory() as temp_dir:
-            staged_source = Path(temp_dir) / "setuora-restore-source.db"
-            shutil.copy2(source, staged_source)
-            verify_setuora_backup(staged_source)
-
-            safety_backup = create_scheduled_backup()
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-            temp_destination = database_path.with_name(f".{database_path.name}.restore-{stamp}.tmp")
-            if temp_destination.exists():
-                temp_destination.unlink()
-            shutil.copy2(staged_source, temp_destination)
-            verify_setuora_backup(temp_destination)
-
-            if reload_runtime:
-                from app.database import engine
-
-                engine.dispose()
-
-            _remove_sqlite_sidecars(database_path)
-            temp_destination.replace(database_path)
-            _remove_sqlite_sidecars(database_path)
-
-            if reload_runtime:
-                _reload_runtime_database()
-
-        return RestoreInfo(
-            restored_path=database_path,
-            safety_backup_path=safety_backup.path,
-            source_path=source,
-            restored_at=datetime.now(timezone.utc),
-        )
-
-
 def _copy_to_offsite(source: Path, filename: str, settings: object) -> Path | None:
     offsite_value = getattr(settings, "backup_offsite_directory", "").strip()
     if not offsite_value:
@@ -403,19 +328,3 @@ def _format_env_value(value: str) -> str:
     if value.strip() != value or any(character.isspace() for character in value):
         return f'"{value}"'
     return value
-
-
-def _remove_sqlite_sidecars(database_path: Path) -> None:
-    for suffix in ("-wal", "-shm", "-journal"):
-        database_path.with_name(f"{database_path.name}{suffix}").unlink(missing_ok=True)
-
-
-def _reload_runtime_database() -> None:
-    from app.database import Base, SessionLocal, engine
-    from app.services.bootstrap import bootstrap
-    from app.services.schema import ensure_runtime_schema
-
-    Base.metadata.create_all(bind=engine)
-    ensure_runtime_schema(engine)
-    with SessionLocal() as db:
-        bootstrap(db)

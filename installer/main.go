@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	repositoryURL = "https://github.com/Dijo-404/Proj_Setu.git"
-	defaultBranch = "main"
+	repositoryURL        = "https://github.com/Setuora/Setuora-Master.git"
+	defaultBranch        = "main"
+	defaultInstallFolder = "Setuora-Master"
 )
 
 var validBranch = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
@@ -94,11 +95,11 @@ func parseOptions(arguments []string) (installerOptions, error) {
 		arguments = arguments[1:]
 	}
 
-	flags := flag.NewFlagSet("Setuora", flag.ContinueOnError)
+	flags := flag.NewFlagSet("Setuora Master", flag.ContinueOnError)
 	flags.SetOutput(os.Stdout)
-	flags.StringVar(&options.installDir, "install-dir", defaultInstallDirectory(), "Setuora installation directory")
+	flags.StringVar(&options.installDir, "install-dir", defaultInstallDirectory(), "Setuora Master installation directory")
 	flags.StringVar(&options.branch, "branch", defaultBranch, "Git branch to install")
-	flags.IntVar(&options.port, "port", 8000, "local Setuora port")
+	flags.IntVar(&options.port, "port", 8000, "local Setuora Master port")
 	flags.BoolVar(&options.withCaddy, "with-caddy", true, "configure LAN HTTPS/Caddy during setup (use --with-caddy=false to opt out)")
 	flags.BoolVar(&options.elevated, "elevated", false, "internal UAC flag")
 	flags.BoolVar(&options.interactive, "interactive", false, "internal interactive-menu flag")
@@ -144,14 +145,14 @@ func defaultInstallDirectory() string {
 		}
 	}
 	if systemDrive := strings.TrimSpace(os.Getenv("SystemDrive")); systemDrive != "" {
-		return filepath.Join(systemDrive+string(os.PathSeparator), "Setuora")
+		return filepath.Join(systemDrive+string(os.PathSeparator), defaultInstallFolder)
 	}
-	return `C:\Setuora`
+	return `C:\` + defaultInstallFolder
 }
 
 func runInstaller(options installerOptions) error {
-	fmt.Println("Setuora QR Tally Bridge Setup")
-	fmt.Println("==============================")
+	fmt.Println("Setuora Master Setup")
+	fmt.Println("=====================")
 	fmt.Printf("Installation folder: %s\n\n", options.installDir)
 
 	wasInstalled := fileExists(filepath.Join(options.installDir, ".git"))
@@ -172,9 +173,9 @@ func runInstaller(options installerOptions) error {
 
 	fmt.Println("\n== Complete Application Setup ==")
 	if err := runSetup(options, wasInstalled && !options.withCaddy); err != nil {
-		return fmt.Errorf("Setuora setup failed: %w", err)
+		return fmt.Errorf("Setuora Master setup failed: %w", err)
 	}
-	fmt.Println("\nSetuora setup completed successfully.")
+	fmt.Println("\nSetuora Master setup completed successfully.")
 	return nil
 }
 
@@ -274,7 +275,7 @@ func installGitFromOfficialRelease() error {
 		return err
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "SetuoraInstaller")
+	request.Header.Set("User-Agent", "SetuoraMasterInstaller")
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -314,7 +315,7 @@ func installGitFromOfficialRelease() error {
 		return fmt.Errorf("download Git installer: HTTP %s", installerResponse.Status)
 	}
 
-	temporaryFile, err := os.CreateTemp("", "Setuora-Git-*.exe")
+	temporaryFile, err := os.CreateTemp("", "Setuora-Master-Git-*.exe")
 	if err != nil {
 		return err
 	}
@@ -342,27 +343,27 @@ func verifyAuthenticodeSignature(path string) error {
 }
 
 func synchronizeRepository(gitPath, installDir, branch string) error {
-	fmt.Println("\n== Download or Update Setuora ==")
+	fmt.Println("\n== Download or Update Setuora Master ==")
 	gitDirectory := filepath.Join(installDir, ".git")
 	if !fileExists(gitDirectory) {
 		if exists, empty, err := directoryState(installDir); err != nil {
 			return err
 		} else if exists && !empty {
-			return fmt.Errorf("%s exists but is not a Setuora Git checkout; choose an empty --install-dir", installDir)
+			return fmt.Errorf("%s exists but is not a Setuora Master Git checkout; choose an empty --install-dir", installDir)
 		}
 		if err := os.MkdirAll(filepath.Dir(installDir), 0o755); err != nil {
 			return fmt.Errorf("create installation parent folder: %w", err)
 		}
 		fmt.Printf("Cloning %s branch %s...\n", repositoryURL, branch)
 		if err := runVisible(gitPath, "clone", "--branch", branch, "--single-branch", repositoryURL, installDir); err != nil {
-			return fmt.Errorf("clone Setuora: %w", err)
+			return fmt.Errorf("clone Setuora Master: %w", err)
 		}
 		return nil
 	}
 
 	remote, err := gitOutput(gitPath, installDir, "remote", "get-url", "origin")
 	if err != nil {
-		return fmt.Errorf("read the Setuora Git remote: %w", err)
+		return fmt.Errorf("read the Setuora Master Git remote: %w", err)
 	}
 	if !isSetuoraRemote(remote) {
 		return fmt.Errorf("the existing origin remote is %q, expected %s", strings.TrimSpace(remote), repositoryURL)
@@ -378,7 +379,7 @@ func synchronizeRepository(gitPath, installDir, branch string) error {
 
 	worktree, err := gitOutput(gitPath, installDir, "status", "--porcelain")
 	if err != nil {
-		return fmt.Errorf("inspect local Setuora files: %w", err)
+		return fmt.Errorf("inspect local Setuora Master files: %w", err)
 	}
 	if strings.TrimSpace(worktree) != "" {
 		return errors.New("local source changes are present; setup will not overwrite them. Commit or stash the changes, or use 'Setuora.exe repair' to repair dependencies without changing source files")
@@ -386,16 +387,16 @@ func synchronizeRepository(gitPath, installDir, branch string) error {
 
 	fmt.Printf("Updating branch %s from GitHub...\n", branch)
 	if err := runGitVisible(gitPath, installDir, "fetch", "--no-tags", "origin", branch); err != nil {
-		return fmt.Errorf("download the latest Setuora files: %w", err)
+		return fmt.Errorf("download the latest Setuora Master files: %w", err)
 	}
 	currentHead, err := gitOutput(gitPath, installDir, "rev-parse", "HEAD")
 	if err != nil {
-		return fmt.Errorf("read the installed Setuora version: %w", err)
+		return fmt.Errorf("read the installed Setuora Master version: %w", err)
 	}
 	currentHead = strings.TrimSpace(currentHead)
 	canFastForward, err := gitIsAncestor(gitPath, installDir, currentHead, "FETCH_HEAD")
 	if err != nil {
-		return fmt.Errorf("compare installed and downloaded Setuora histories: %w", err)
+		return fmt.Errorf("compare installed and downloaded Setuora Master histories: %w", err)
 	}
 	if canFastForward {
 		if err := runGitVisible(gitPath, installDir, "merge", "--ff-only", "FETCH_HEAD"); err != nil {
@@ -406,7 +407,7 @@ func synchronizeRepository(gitPath, installDir, branch string) error {
 
 	shortHead, err := gitOutput(gitPath, installDir, "rev-parse", "--short", currentHead)
 	if err != nil {
-		return fmt.Errorf("name the installed Setuora version for backup: %w", err)
+		return fmt.Errorf("name the installed Setuora Master version for backup: %w", err)
 	}
 	backupBranch := "setuora-backup/" + time.Now().Format("20060102-150405000") + "-" + strings.TrimSpace(shortHead)
 	fmt.Printf("Release history differs from this installation. Preserving the installed commit as %s before updating...\n", backupBranch)
@@ -475,7 +476,7 @@ func runProjectCommand(options installerOptions) error {
 }
 
 func chooseCommand() (string, error) {
-	fmt.Println("Setuora QR Tally Bridge")
+	fmt.Println("Setuora Master")
 	fmt.Println("1. Install or finish setup")
 	fmt.Println("2. Repair this installation (keeps data and settings)")
 	fmt.Println("3. Update to the latest version")
@@ -505,12 +506,12 @@ func chooseCommand() (string, error) {
 
 func printUsage() {
 	fmt.Println("Usage: Setuora.exe <setup|repair|update|start|stop> [options]")
-	fmt.Println("  setup  Installs Setuora or safely updates an existing clean installation.")
+	fmt.Println("  setup  Installs Setuora Master or safely updates an existing clean installation.")
 	fmt.Println("         Configures Caddy HTTPS and Windows autostart by default; use --with-caddy=false to opt out.")
 	fmt.Println("  repair Repairs Python, packages, services, and app startup without changing data, settings, or source files.")
 	fmt.Println("  update Downloads a verified update, tests it, and restores the prior runtime state.")
-	fmt.Println("  start  Starts Setuora and the optional HTTPS proxy.")
-	fmt.Println("  stop   Stops Setuora and the optional HTTPS proxy.")
+	fmt.Println("  start  Starts Setuora Master and the optional HTTPS proxy.")
+	fmt.Println("  stop   Stops Setuora Master and the optional HTTPS proxy.")
 }
 
 func runVisibleInDir(directory, name string, arguments ...string) error {
@@ -601,7 +602,7 @@ func isSetuoraRemote(remote string) bool {
 	case strings.HasPrefix(normalized, "git@github.com:"):
 		normalized = "github.com/" + strings.TrimPrefix(normalized, "git@github.com:")
 	}
-	return normalized == "github.com/dijo-404/proj_setu"
+	return normalized == "github.com/setuora/setuora-master"
 }
 
 func powershellQuote(value string) string {
@@ -665,7 +666,7 @@ func fileExists(path string) bool {
 }
 
 func fail(err error) {
-	fmt.Fprintf(os.Stderr, "\nSetuora command failed: %v\n", err)
+	fmt.Fprintf(os.Stderr, "\nSetuora Master command failed: %v\n", err)
 	fmt.Fprintln(os.Stderr, "Your existing Setuora data and .env were not removed.")
 	fmt.Print("Press Enter to close...")
 	_, _ = fmt.Fscanln(os.Stdin)

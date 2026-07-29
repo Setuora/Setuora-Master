@@ -3,11 +3,10 @@ from jinja2 import Undefined
 
 from app.database import SessionLocal
 from app.models import has_any_role
-from app.services.access_control import configured_role_has_access, landing_path_for, role_has_access
-from app.services.report_format import batch_voucher_number, report_date
+from app.services.access_control import configured_role_has_access, role_has_access
+from app.services.report_format import report_date
 
 templates = Jinja2Templates(directory="app/templates")
-templates.env.globals["batch_voucher_number"] = batch_voucher_number
 templates.env.globals["report_date"] = report_date
 templates.env.filters["report_date"] = report_date
 
@@ -43,34 +42,3 @@ def has_role(subject, *roles) -> bool:
 
 
 templates.env.globals["has_role"] = has_role
-
-
-def role_can_view_batch(subject, batch_type: str) -> bool:
-    access_key = {
-        "PURCHASE": "purchase_data",
-        "RECEIVE": "purchase_data",
-        "SALE": "sales_data",
-        "SALES_RETURN": "sales_data",
-        "PURCHASE_RETURN": "purchase_data",
-        "AUDIT": "audit_data",
-        "ISSUE": "issue_data",
-        "QR_ASSIGNMENT": "barcode_assignment",
-    }.get(batch_type)
-    return bool(access_key and role_can(subject, access_key))
-
-
-templates.env.globals["role_can_view_batch"] = role_can_view_batch
-
-
-def user_home_path(subject) -> str:
-    role = getattr(subject, "role", "")
-    access_config = getattr(subject, "_access_config", None)
-    if access_config is None:
-        with SessionLocal() as db:
-            from app.services.access_control import get_role_access_config
-
-            access_config = get_role_access_config(db)
-    return landing_path_for(access_config, role)
-
-
-templates.env.globals["user_home_path"] = user_home_path

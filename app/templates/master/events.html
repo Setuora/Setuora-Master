@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Movements - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">Append-only journal</p><h1>Stock movements</h1></div>
+</section>
+
+<section class="panel">
+  <form method="get" class="filters">
+    <label>Franchise
+      <select name="franchise"><option value="">All franchises</option>
+        {% for node in franchises %}<option value="{{ node.code }}" {{ 'selected' if filters.franchise == node.code else '' }}>{{ node.code }} · {{ node.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Event
+      <select name="event_type"><option value="">All movements</option>
+        {% for value in event_types %}<option value="{{ value }}" {{ 'selected' if filters.event_type == value else '' }}>{{ value|replace('_', ' ')|title }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Search<input name="q" value="{{ filters.q }}" placeholder="Serial, reference, event ID"></label>
+    <label>Start<input type="date" name="start" value="{{ filters.start }}"></label>
+    <label>End<input type="date" name="end" value="{{ filters.end }}"></label>
+    <div class="filter-actions"><button class="button primary" type="submit">Filter</button><a class="button ghost" href="/network/events">Reset</a></div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Occurred</th><th>Franchise / sequence</th><th>Movement</th><th>Reference</th><th>Actor</th><th>Tally</th></tr></thead>
+      <tbody>
+        {% for event in events %}
+        <tr>
+          <td>{{ event.occurred_at|report_date }}</td>
+          <td><strong>{{ event.franchise.code }}</strong><small>#{{ event.sequence }}</small></td>
+          <td><a href="/network/events/{{ event.event_id }}">{{ event.event_type|replace('_', ' ')|title }}</a></td>
+          <td>{{ event.reference or '—' }}</td>
+          <td>{{ event.actor or 'System' }}</td>
+          <td>{% if event.tally_batch %}<span class="status {{ event.tally_batch.status|lower }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</span>{% else %}Not applicable{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty">No movements match these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">Showing at most 500 newest events. Exported reports use the same immutable event-time franchise attribution.</p>
+</section>
+{% endblock %}

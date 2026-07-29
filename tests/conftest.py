@@ -1,6 +1,10 @@
+import os
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+os.environ.setdefault("SETUORA_APP_MODE", "master")
 
 from app.database import Base
 

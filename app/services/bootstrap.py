@@ -4,7 +4,11 @@ from sqlalchemy.orm import Session
 from app.config import INSECURE_BOOTSTRAP_PASSWORDS, get_settings
 from app.models import Role, User, has_role
 from app.security import MIN_PASSWORD_LENGTH, hash_password, verify_password
-from app.services.settings import clear_legacy_placeholder_settings, ensure_company_records, ensure_default_settings
+from app.services.settings import (
+    clear_legacy_placeholder_settings,
+    ensure_company_records,
+    ensure_default_settings,
+)
 
 DEFAULT_ADMIN_PASSWORD = "admin123"
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
@@ -12,8 +12,15 @@ from xml.etree import ElementTree as ET
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import Batch, BatchStatus, BatchType, GstRegistrationType, SyncAttempt, utc_now
-from app.services.inventory import update_batch_transaction_references
+from app.models import (
+    Batch,
+    BatchStatus,
+    BatchType,
+    GstRegistrationType,
+    SyncAttempt,
+    utc_now,
+)
+from app.services.batch_items import update_transaction_references
 from app.services.settings import (
     get_all_settings,
     gst_rate_key,
@@ -21,7 +28,6 @@ from app.services.settings import (
     parse_sales_gst_ledger_mappings,
 )
 from app.services.voucher import calculate_voucher_summary
-
 
 TALLY_XML_SUPPORTED_BATCH_TYPES = {
     BatchType.PURCHASE.value,
@@ -213,7 +219,7 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
         _text(voucher, "PLACEOFSUPPLY", batch.party_state)
         _text(voucher, "COUNTRYOFRESIDENCE", "India")
     _text(voucher, "PERSISTEDVIEW", "Accounting Voucher View")
-    _text(voucher, "NARRATION", f"Setuora barcode batch {batch.batch_number}")
+    _text(voucher, "NARRATION", f"Setuora Master network batch {batch.batch_number}")
 
     summary = calculate_voucher_summary(batch)
     if is_sales_side:
@@ -459,7 +465,7 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     batch.last_error = None
     batch.synced_at = utc_now()
     batch.sync_started_at = None
-    update_batch_transaction_references(db, batch)
+    update_transaction_references(db, batch)
     attempt.status = BatchStatus.SYNCED.value
     attempt.request_xml = result.request_xml
     attempt.response_xml = result.response_xml

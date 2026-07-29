@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Tally Sync - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head"><div><p class="eyebrow">Central integration</p><h1>Tally sync queue</h1><p class="muted">Only Master builds and posts Tally vouchers.</p></div></section>
+<section class="panel">
+  <form method="get" class="filters">
+    <label>Franchise<select name="franchise"><option value="">All franchises</option>{% for node in franchises %}<option value="{{ node.code }}" {{ 'selected' if filters.franchise == node.code else '' }}>{{ node.code }} · {{ node.name }}</option>{% endfor %}</select></label>
+    <label>Status<select name="tally_status"><option value="">All statuses</option>{% for value in statuses %}<option value="{{ value }}" {{ 'selected' if filters.status == value else '' }}>{{ value|replace('_', ' ')|title }}</option>{% endfor %}</select></label>
+    <div class="filter-actions"><button class="button primary" type="submit">Filter</button><a class="button ghost" href="/network/tally">Reset</a></div>
+  </form>
+</section>
+<section class="panel">
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Occurred</th><th>Franchise</th><th>Source</th><th>Voucher batch</th><th>Status</th><th>Error</th></tr></thead>
+      <tbody>
+        {% for event in events %}
+        <tr>
+          <td>{{ event.occurred_at|report_date }}</td>
+          <td>{{ event.franchise.code }}</td>
+          <td>{{ event.event_type|replace('_', ' ')|title }}<small>{{ event.reference or event.event_id }}</small></td>
+          <td><a href="/network/tally/{{ event.tally_batch.id }}">{{ event.tally_batch.batch_number }}</a></td>
+          <td><span class="status {{ event.tally_batch.status|lower }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</span></td>
+          <td>{{ event.tally_batch.last_error or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty">No Tally queue items match these filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

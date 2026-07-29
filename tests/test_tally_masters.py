@@ -2,6 +2,7 @@ from datetime import date
 from unittest.mock import patch
 
 from app.models import Product, User
+from app.services.settings import update_settings
 from app.services.tally_masters import (
     build_company_list_xml,
     build_ledger_list_xml,
@@ -14,10 +15,10 @@ from app.services.tally_masters import (
     fetch_tally_sales_book,
     live_sync_readiness,
     readiness_counts,
+)
+from app.services.tally_masters import (
     test_tally_gateway as check_tally_gateway,
 )
-from app.services.settings import update_settings
-
 
 VALID_SETTINGS = {
     "company_name": "Setuora Test Company",

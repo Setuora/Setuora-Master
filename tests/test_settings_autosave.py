@@ -6,12 +6,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.auth import SESSION_COOKIE
 from app.database import Base, get_db
 from app.main import app
 from app.models import ChangeAudit, Company, User
 from app.routers.settings import autosave_settings, validate_settings
-from app.security import create_session_token
 from app.services.settings import (
     COMPANY_SETTING_KEYS,
     LEGACY_PLACEHOLDER_SETTINGS,
@@ -29,7 +27,7 @@ from app.services.settings import (
     update_company,
     update_settings,
 )
-
+from tests.factories import authenticate_client
 
 VALID_SETTINGS = {
     "company_name": "Setuora Test Company",
@@ -105,10 +103,15 @@ def test_autosave_route_records_settings_audit():
         with Session() as db:
             requested = _valid_request(db)
         requested["sales_ledger_name"] = "Audited Sales Ledger"
-        response = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"}).post(
+        client = TestClient(
+            app,
+            follow_redirects=False,
+            headers={"Origin": "http://testserver"},
+        )
+        authenticate_client(client, 1)
+        response = client.post(
             "/settings/autosave",
             data=requested,
-            cookies={SESSION_COOKIE: create_session_token(1)},
         )
     finally:
         app.dependency_overrides.clear()
@@ -145,12 +148,12 @@ def test_settings_routes_preserve_removed_fields_when_omitted():
         "round_off_ledger_name": "Round Off",
         "retry_interval_seconds": "180",
     }
-    cookies = {SESSION_COOKIE: create_session_token(1)}
     app.dependency_overrides[get_db] = override_get_db
     try:
         client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
-        autosave = client.post("/settings/autosave", data=visible_fields, cookies=cookies)
-        save = client.post("/settings", data=visible_fields, cookies=cookies)
+        authenticate_client(client, 1)
+        autosave = client.post("/settings/autosave", data=visible_fields)
+        save = client.post("/settings", data=visible_fields)
     finally:
         app.dependency_overrides.clear()
 
@@ -188,7 +191,13 @@ def test_create_company_without_legacy_tally_fields_inherits_current_values():
 
     app.dependency_overrides[get_db] = override_get_db
     try:
-        response = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"}).post(
+        client = TestClient(
+            app,
+            follow_redirects=False,
+            headers={"Origin": "http://testserver"},
+        )
+        authenticate_client(client, 1)
+        response = client.post(
             "/settings/companies",
             data={
                 "name": "Second Profile",
@@ -198,7 +207,6 @@ def test_create_company_without_legacy_tally_fields_inherits_current_values():
                 "sales_gst_ledger_mappings": "",
                 "round_off_ledger_name": "Round Off",
             },
-            cookies={SESSION_COOKIE: create_session_token(1)},
         )
     finally:
         app.dependency_overrides.clear()

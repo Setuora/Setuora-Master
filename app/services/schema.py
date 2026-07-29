@@ -1,6 +1,6 @@
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-import sqlite3
 
 from sqlalchemy import Engine, inspect, text
 
@@ -8,6 +8,12 @@ from app.database import engine
 
 
 def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
+    """Bring existing SQLite installations forward without discarding old data.
+
+    Several legacy columns are intentionally retained because Master can reuse an
+    existing Setuora database for users, product metadata, and Tally history.
+    Their presence does not expose the removed Lite workflows.
+    """
     target = target_engine or engine
     inspector = inspect(target)
     if "batches" not in inspector.get_table_names():

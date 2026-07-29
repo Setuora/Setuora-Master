@@ -106,7 +106,7 @@ function Start-CaddyProxy {
         throw "Caddy HTTPS could not be configured for Windows autostart. Run Setuora.exe start as Administrator."
     }
     if ($caddyService.Status -ne "Running") {
-        Write-Host "Starting the Setuora Caddy HTTPS proxy..."
+        Write-Host "Starting the Setuora Master Caddy HTTPS proxy..."
         try {
             Start-Service -Name $CaddyServiceName
             $caddyService.WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
@@ -119,7 +119,7 @@ function Start-CaddyProxy {
     if ($caddyService.Status -ne "Running") {
         throw "Caddy HTTPS started and then stopped. Run Setuora.exe repair and validate deployment\caddy\Caddyfile."
     }
-    Write-Host "Setuora Caddy HTTPS proxy is running." -ForegroundColor Green
+    Write-Host "Setuora Master Caddy HTTPS proxy is running." -ForegroundColor Green
     return $true
 }
 
@@ -182,7 +182,7 @@ if ($service -and -not $ConsoleOnly) {
         try {
             Start-Service -Name $ServiceName
             $service.WaitForStatus("Running", [TimeSpan]::FromSeconds(20))
-            Write-Host "Setuora is running as the Windows service." -ForegroundColor Green
+            Write-Host "Setuora Master is running as the Windows service." -ForegroundColor Green
         }
         catch [System.ServiceProcess.TimeoutException] {
             throw "The Setuora Windows service did not start within 20 seconds. Check Windows Services, then try again."
@@ -193,13 +193,13 @@ if ($service -and -not $ConsoleOnly) {
     }
 
     $caddyRunning = Start-CaddyProxy
-    Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health" -DisplayName "Setuora local health check"
+    Wait-HealthEndpoint -Uri "http://127.0.0.1:$Port/health" -DisplayName "Setuora Master local health check"
     if ($caddyRunning) {
         $caddyAddress = Get-CaddyAddress
         if (-not $caddyAddress) {
             throw "Caddy is running, but no HTTPS address could be read from '$caddyfile'."
         }
-        Wait-HealthEndpoint -Uri "https://$caddyAddress/health" -DisplayName "Setuora Caddy HTTPS"
+        Wait-HealthEndpoint -Uri "https://$caddyAddress/health" -DisplayName "Setuora Master Caddy HTTPS"
     }
     Write-Host "Use scripts\stop_setuora.bat to stop it."
     return
@@ -214,7 +214,7 @@ if ($serverProcesses.Count -gt 0) {
     return
 }
 
-Write-Host "Starting Setuora QR Tally Bridge..."
+Write-Host "Starting Setuora Master..."
 Write-Host "Open: http://${HostAddress}:$Port"
 Write-Host "Press Ctrl+C in this window to stop the app."
 & $pythonExe -m uvicorn app.main:app --host $HostAddress --port $Port

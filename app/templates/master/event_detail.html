@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Event {{ event.event_id }} - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">{{ event.franchise.code }} · sequence {{ event.sequence }}</p><h1>{{ event.event_type|replace('_', ' ')|title }}</h1></div>
+  <a class="button" href="/network/events">Back to movements</a>
+</section>
+<section class="panel">
+  <dl class="details">
+    <dt>Event ID</dt><dd>{{ event.event_id }}</dd>
+    <dt>Reference</dt><dd>{{ event.reference or '—' }}</dd>
+    <dt>Occurred</dt><dd>{{ event.occurred_at|report_date }}</dd>
+    <dt>Received</dt><dd>{{ event.received_at|report_date }}</dd>
+    <dt>Actor</dt><dd>{{ event.actor or 'System' }}</dd>
+    <dt>Payload hash</dt><dd><code>{{ event.payload_hash }}</code></dd>
+    <dt>Tally queue</dt><dd>{% if event.tally_batch %}<a href="/network/tally/{{ event.tally_batch.id }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</a>{% else %}Not applicable{% endif %}</dd>
+  </dl>
+</section>
+<section class="split">
+  <article class="panel split-card"><div class="section-title"><h2>Immutable payload</h2></div><pre class="payload-view">{{ payload }}</pre></article>
+  <article class="panel split-card"><div class="section-title"><h2>Application result</h2></div><pre class="payload-view">{{ result }}</pre></article>
+</section>
+{% endblock %}

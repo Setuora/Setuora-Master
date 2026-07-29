@@ -3,16 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Login - Setuora</title>
+  <title>Login - Setuora Master</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=20260710-table-fonts-3">
+  <link rel="stylesheet" href="/static/styles.css?v=20260729-master-cleanup-1">
 </head>
 <body class="auth-body">
   <main class="auth-shell">
     <section class="auth-panel">
       <div>
-        <h1>Setuora Barcode Tally Bridge</h1>
-        <p class="muted" style="margin-top:8px">Sign in to scan stock and sync with Tally.</p>
+        <h1>Setuora Master</h1>
+        <p class="muted" style="margin-top:8px">
+          Monitor franchise stock and synchronize approved transactions with Tally.
+        </p>
       </div>
       {% if error %}
       <div class="alert error">{{ error }}</div>
@@ -32,6 +34,6 @@
       </form>
     </section>
   </main>
-  <script src="/static/password-toggle.js?v=20260624-expiry-1"></script>
+  <script src="/static/password-toggle.js?v=20260729-master-1"></script>
 </body>
 </html>

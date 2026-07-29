@@ -2,23 +2,38 @@ package main
 
 import "testing"
 
+func TestOfficialRepository(t *testing.T) {
+	if got, want := repositoryURL, "https://github.com/Setuora/Setuora-Master.git"; got != want {
+		t.Fatalf("repositoryURL = %q, want %q", got, want)
+	}
+	if defaultBranch != "main" {
+		t.Fatalf("defaultBranch = %q, want main", defaultBranch)
+	}
+	if defaultInstallFolder != "Setuora-Master" {
+		t.Fatalf("defaultInstallFolder = %q, want Setuora-Master", defaultInstallFolder)
+	}
+}
+
 func TestSetuoraRemoteVariants(t *testing.T) {
 	valid := []string{
-		"https://github.com/Dijo-404/Proj_Setu.git",
-		"https://github.com/Dijo-404/Proj_Setu/",
-		"git@github.com:Dijo-404/Proj_Setu.git",
-		"ssh://git@github.com/Dijo-404/Proj_Setu.git",
+		"https://github.com/Setuora/Setuora-Master.git",
+		"https://github.com/Setuora/Setuora-Master/",
+		"git@github.com:Setuora/Setuora-Master.git",
+		"ssh://git@github.com/Setuora/Setuora-Master.git",
 	}
 	for _, remote := range valid {
 		if !isSetuoraRemote(remote) {
 			t.Errorf("expected valid Setuora remote: %s", remote)
 		}
 	}
-	if isSetuoraRemote("https://github.com/example/Proj_Setu.git") {
+	if isSetuoraRemote("https://github.com/example/Setuora-Master.git") {
 		t.Fatal("accepted an unrelated repository")
 	}
-	if isSetuoraRemote("http://github.com/Dijo-404/Proj_Setu.git") {
+	if isSetuoraRemote("http://github.com/Setuora/Setuora-Master.git") {
 		t.Fatal("accepted an insecure HTTP repository")
+	}
+	if isSetuoraRemote("https://github.com/Dijo-404/Proj_Setu.git") {
+		t.Fatal("accepted the retired monolith repository")
 	}
 }
 

@@ -3,7 +3,6 @@ import secrets
 from functools import lru_cache
 from pathlib import Path
 
-
 DEFAULT_SECRET_KEY = "dev-change-me"
 PLACEHOLDER_SECRET_KEYS = {
     DEFAULT_SECRET_KEY,
@@ -73,7 +72,10 @@ def _resolve_secret_key() -> str:
 
 class Settings:
     def __init__(self) -> None:
-        self.app_name: str = os.getenv("APP_NAME", "Setuora Barcode Tally Bridge")
+        self.app_mode: str = os.getenv("SETUORA_APP_MODE", "master").strip().lower()
+        if self.app_mode != "master":
+            raise RuntimeError("Setuora-Master only supports SETUORA_APP_MODE=master.")
+        self.app_name: str = os.getenv("APP_NAME", "Setuora Master")
         self.secret_key: str = _resolve_secret_key()
         self.database_url: str = os.getenv("DATABASE_URL", "sqlite:///./data/setuora.db")
         self.session_timeout_minutes: int = int(os.getenv("SESSION_TIMEOUT_MINUTES", "480"))
@@ -91,6 +93,16 @@ class Settings:
         self.backup_interval_hours: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
         self.backup_retention_count: int = int(os.getenv("BACKUP_RETENTION_COUNT", "14"))
         self.backup_startup_delay_seconds: int = int(os.getenv("BACKUP_STARTUP_DELAY_SECONDS", "60"))
+        self.node_api_rate_limit_per_minute: int = int(
+            os.getenv("NODE_API_RATE_LIMIT_PER_MINUTE", "120")
+        )
+        self.node_api_max_event_items: int = int(os.getenv("NODE_API_MAX_EVENT_ITEMS", "5000"))
+        self.node_api_max_body_bytes: int = int(
+            os.getenv("NODE_API_MAX_BODY_BYTES", str(5 * 1024 * 1024))
+        )
+        self.franchise_offline_minutes: int = int(
+            os.getenv("FRANCHISE_OFFLINE_MINUTES", "15")
+        )
 
     @property
     def using_default_secret(self) -> bool:

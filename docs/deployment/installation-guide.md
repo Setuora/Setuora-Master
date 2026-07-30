@@ -42,6 +42,12 @@ not installed on the host:
 The application and Tailscale state live in persistent Docker volumes, not in
 the container layers.
 
+For a client who should not need Git, build and send the platform-specific
+single-file installer described in
+[client-packages.md](client-packages.md). Linux receives one `.run` file and
+Windows receives one double-clickable `.cmd` file. The same file installs or
+updates the complete application.
+
 ## Verify
 
 ```bash
@@ -82,6 +88,9 @@ python deploy.py update
 
 The command rebuilds the image and preserves `.env`, database, backups, and the
 Tailscale identity.
+
+For a client package, run the newer platform installer again. It detects the
+existing installation and updates it without deleting `.env`.
 
 ## Production gates
 

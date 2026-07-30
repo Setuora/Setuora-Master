@@ -35,6 +35,7 @@ maintenance, and Node Sync routes. Public API documentation is disabled.
 - [Master/Lite topology](docs/architecture/master-lite-topology.md)
 - [Node Sync API v1](docs/api/node-sync-v1.md)
 - [Universal Linux/Windows deployment](docs/deployment/universal-deployment.md)
+- [Shareable client installer packages](docs/deployment/client-packages.md)
 - [Remote franchise connectivity](docs/deployment/remote-franchise-connectivity.md)
 
 Lite always initiates the connection:
@@ -165,6 +166,24 @@ Install Tailscale on every Lite host, tag it `tag:setuora-lite`, and configure
 its `MASTER_URL` with the HTTPS URL printed by setup. See the
 [universal deployment guide](docs/deployment/universal-deployment.md).
 
+## Shareable Linux and Windows packages
+
+Create client-ready single-file installers from a reviewed release:
+
+```bash
+python scripts/build_client_packages.py --version 1.0.0
+```
+
+This writes one self-extracting Linux `.run` file, one double-clickable Windows
+`.cmd` file, and SHA-256 checksums to `dist/`. Each platform file installs or
+updates the complete application and excludes `.env`, credentials, databases,
+backups, and Tailscale state. See the
+[client package guide](docs/deployment/client-packages.md).
+
+For local use, the project root contains stable shortcuts named
+`Linux — Setuora Master.run` and `Windows — Setuora Master.cmd`. Each shortcut
+automatically launches the newest matching installer from `dist/`.
+
 ## First administration
 
 After the first login:
@@ -245,6 +264,7 @@ docker compose config --quiet
 ## Deployment guides
 
 - [Universal Linux/Windows deployment](docs/deployment/universal-deployment.md)
+- [Shareable client installer packages](docs/deployment/client-packages.md)
 - [Installation](docs/deployment/installation-guide.md)
 - [Pilot release checklist](docs/deployment/production-release-checklist.md)
 - [Backup and recovery](docs/deployment/backup-restore-guide.md)

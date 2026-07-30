@@ -18,5 +18,6 @@ data/secret_key
 htmlcov/
 node_modules/
 logs/
+dist/
 CLAUDE.md
 tailscale-state/

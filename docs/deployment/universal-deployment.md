@@ -69,6 +69,10 @@ The helper:
 The prompt does not put either secret in shell history. `.env` is excluded from
 Git and the Docker build context.
 
+For delivery without Git, use the single-file Linux and Windows installers
+described in [client-packages.md](client-packages.md). Running the same file
+performs either first-time setup or an update through this deployment helper.
+
 For non-interactive setup, prepare `.env` first:
 
 ```text

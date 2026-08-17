@@ -2499,7 +2499,8 @@ table .status,
 .status.submitted,
 .status.scanned,
 .status.active,
-.status.received {
+.status.received,
+.status.approved {
   background: var(--ok-bg);
   color: var(--ok-fg);
 }
@@ -2516,8 +2517,14 @@ table .status,
   color: var(--warn-fg);
 }
 
+.status.pending {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
 .status.failed,
 .status.rejected,
+.status.denied,
 .status.sold,
 .status.damaged,
 .status.missing,
@@ -2525,6 +2532,25 @@ table .status,
 .status.replaced {
   background: var(--bad-bg);
   color: var(--bad-fg);
+}
+
+.receipt-review-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 280px;
+  margin-top: 8px;
+}
+
+.receipt-deny-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.receipt-deny-form input {
+  min-height: 34px;
+  padding: 6px 10px;
 }
 
 .secret-once {

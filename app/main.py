@@ -23,6 +23,7 @@ from app.routers import (
     maintenance,
     master_console,
     node_api,
+    receipts,
     tally_check,
     users,
 )
@@ -75,6 +76,7 @@ def create_app(app_mode: str | None = None) -> FastAPI:
     app.include_router(account.router)
     app.include_router(master_console.router)
     app.include_router(node_api.router)
+    app.include_router(receipts.router)
     app.include_router(settings_router.router)
     app.include_router(tally_check.router)
     app.include_router(maintenance.router)

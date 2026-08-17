@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from collections.abc import Iterable
@@ -20,6 +21,8 @@ from app.models import (
     NetworkStock,
     NodeCommand,
     Product,
+    Receipt,
+    ReceiptStatus,
     Serial,
     SerialStatus,
     StockTransfer,
@@ -1035,6 +1038,22 @@ def _apply_event(
         return _dispatch_transfer(db, node, inbound, event)
     if event.type == NetworkEventType.TRANSFER_RECEIVED:
         return _receive_transfer(db, node, inbound, event)
+    if event.type == NetworkEventType.RECEIPT_SUBMITTED:
+        receipt = Receipt(
+            lite_receipt_id=str(event.receipt_id),
+            franchise_id=node.id,
+            source_event_id=inbound.id,
+            receipt_date=event.receipt_date,
+            proof_image=base64.b64decode(event.proof_image_base64 or "", validate=True),
+            proof_content_type=event.proof_content_type or "application/octet-stream",
+            utr_number=event.utr_number or None,
+            submitted_by=event.actor,
+            status=ReceiptStatus.PENDING.value,
+            created_at=event.occurred_at,
+        )
+        db.add(receipt)
+        db.flush()
+        return {"receipt_id": receipt.public_id, "status": receipt.status}
     raise NetworkIngestError(422, "UNSUPPORTED_EVENT", "The event type is not supported.")
 
 

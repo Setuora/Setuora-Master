@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -724,6 +725,12 @@ class TransferStatus(str, Enum):
     RECEIVED = "RECEIVED"
 
 
+class ReceiptStatus(str, Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    DENIED = "DENIED"
+
+
 class FranchiseNode(Base):
     """A remotely hosted Setuora Lite installation known to this master."""
 
@@ -778,6 +785,10 @@ class FranchiseNode(Base):
         back_populates="target_franchise",
         cascade="all, delete-orphan",
         foreign_keys="NodeCommand.target_franchise_id",
+    )
+    receipts: Mapped[list["Receipt"]] = relationship(
+        back_populates="franchise",
+        cascade="all, delete-orphan",
     )
 
 
@@ -855,6 +866,50 @@ class InboundEvent(Base):
         foreign_keys=[franchise_id],
     )
     tally_batch: Mapped[Batch | None] = relationship()
+
+
+class Receipt(Base):
+    """Payment proof submitted by a Lite node for Master review."""
+
+    __tablename__ = "receipts"
+    __table_args__ = (
+        UniqueConstraint("franchise_id", "lite_receipt_id", name="uq_receipt_franchise_lite_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(
+        String(36), unique=True, index=True, default=lambda: str(uuid4())
+    )
+    lite_receipt_id: Mapped[str] = mapped_column(String(36), index=True)
+    franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="CASCADE"), index=True
+    )
+    source_event_id: Mapped[int] = mapped_column(
+        ForeignKey("inbound_events.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    receipt_date: Mapped[date] = mapped_column(Date, index=True)
+    proof_image: Mapped[bytes] = mapped_column(LargeBinary)
+    proof_content_type: Mapped[str] = mapped_column(String(40))
+    utr_number: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    submitted_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default=ReceiptStatus.PENDING.value, index=True)
+    rejection_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    franchise: Mapped[FranchiseNode] = relationship(back_populates="receipts")
+    source_event: Mapped[InboundEvent] = relationship()
+    reviewed_by: Mapped[User | None] = relationship()
 
 
 class NetworkStock(Base):

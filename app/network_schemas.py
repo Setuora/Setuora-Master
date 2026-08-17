@@ -1,3 +1,5 @@
+import base64
+import binascii
 from datetime import date, datetime
 from enum import Enum
 from typing import Literal
@@ -18,6 +20,7 @@ class NetworkEventType(str, Enum):
     TRANSFER_DISPATCHED = "TRANSFER_DISPATCHED"
     TRANSFER_RECEIVED = "TRANSFER_RECEIVED"
     HEARTBEAT = "HEARTBEAT"
+    RECEIPT_SUBMITTED = "RECEIPT_SUBMITTED"
 
 
 class NetworkEventItem(BaseModel):
@@ -80,6 +83,13 @@ class NetworkEventV1(BaseModel):
     destination_franchise_code: str | None = Field(default=None, max_length=40)
     transfer_id: UUID | None = None
 
+    # Receipt metadata. Proofs are capped below the Node Sync request limit.
+    receipt_id: UUID | None = None
+    receipt_date: date | None = None
+    proof_content_type: str | None = Field(default=None, max_length=40)
+    proof_image_base64: str | None = None
+    utr_number: str | None = Field(default=None, max_length=80)
+
     @field_validator("occurred_at")
     @classmethod
     def require_timezone(cls, value: datetime) -> datetime:
@@ -102,6 +112,33 @@ class NetworkEventV1(BaseModel):
         if self.type == NetworkEventType.HEARTBEAT:
             if self.items:
                 raise ValueError("HEARTBEAT cannot contain stock items")
+            return self
+
+        if self.type == NetworkEventType.RECEIPT_SUBMITTED:
+            if self.items:
+                raise ValueError("RECEIPT_SUBMITTED cannot contain stock items")
+            if not self.receipt_id or not self.receipt_date or not self.proof_image_base64:
+                raise ValueError(
+                    "RECEIPT_SUBMITTED requires receipt_id, receipt_date, and proof image"
+                )
+            content_type = (self.proof_content_type or "").lower()
+            if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+                raise ValueError("receipt proof must be a JPEG, PNG, or WebP image")
+            try:
+                image = base64.b64decode(self.proof_image_base64, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError("receipt proof is not valid base64") from exc
+            if not image or len(image) > 3 * 1024 * 1024:
+                raise ValueError("receipt proof must be between 1 byte and 3 MB")
+            detected = None
+            if image.startswith(b"\xff\xd8\xff"):
+                detected = "image/jpeg"
+            elif image.startswith(b"\x89PNG\r\n\x1a\n"):
+                detected = "image/png"
+            elif len(image) >= 12 and image[:4] == b"RIFF" and image[8:12] == b"WEBP":
+                detected = "image/webp"
+            if detected != content_type:
+                raise ValueError("receipt proof content does not match its image type")
             return self
 
         if not self.items:

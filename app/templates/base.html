@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#faf9f5">
   <title>{% block title %}Setuora Master{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=20260729-master-cleanup-1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260817-receipts-1">
 </head>
 <body>
   {% if user %}
@@ -20,6 +20,7 @@
         <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Network</a>
         <a href="/network/transfers" class="{{ 'active' if request.url.path.startswith('/network/transfers') else '' }}">Transfers</a>
         <a href="/network/reports" class="{{ 'active' if request.url.path.startswith('/network/reports') else '' }}">Reports</a>
+        <a href="/receipts" class="{{ 'active' if request.url.path.startswith('/receipts') else '' }}">Receipts</a>
         {% endif %}
         {% if has_role(user, 'super_admin', 'admin') %}
         <a href="/network/events" class="{{ 'active' if request.url.path.startswith('/network/events') else '' }}">Movements</a>

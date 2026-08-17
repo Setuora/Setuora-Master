@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Receipts - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">Lite submissions</p><h1>Receipts</h1><p class="muted">Review payment proofs synced from franchise Lite nodes.</p></div>
+</section>
+{% if message %}<div class="alert success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+<section class="panel">
+  <form method="get" class="filters">
+    <label>Franchise<select name="franchise"><option value="">All franchises</option>{% for node in franchises %}<option value="{{ node.code }}" {{ 'selected' if filters.franchise == node.code else '' }}>{{ node.code }} · {{ node.name }}</option>{% endfor %}</select></label>
+    <label>Status<select name="receipt_status"><option value="">All statuses</option>{% for value in statuses %}<option value="{{ value }}" {{ 'selected' if filters.status == value else '' }}>{{ value|title }}</option>{% endfor %}</select></label>
+    <div class="filter-actions"><button class="button primary" type="submit">Filter</button><a class="button ghost" href="/receipts">Reset</a></div>
+  </form>
+</section>
+<section class="panel">
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Date</th><th>Franchise</th><th>Proof</th><th>UTR number</th><th>Submitted by</th><th>Status / review</th></tr></thead>
+      <tbody>
+        {% for receipt in receipts %}
+        <tr>
+          <td>{{ receipt.receipt_date|report_date }}</td>
+          <td>{{ receipt.franchise.code }}<small>{{ receipt.franchise.name }}</small></td>
+          <td><a class="button small" href="/receipts/{{ receipt.public_id }}/proof" target="_blank" rel="noopener">View image</a></td>
+          <td>{{ receipt.utr_number or '-' }}</td>
+          <td>{{ receipt.submitted_by or '-' }}<small>{{ receipt.created_at|report_date }}</small></td>
+          <td>
+            <span class="status {{ receipt.status|lower }}">{{ receipt.status|title }}</span>
+            {% if receipt.status == 'PENDING' and has_role(user, 'super_admin', 'admin') %}
+            <div class="receipt-review-actions">
+              <form method="post" action="/receipts/{{ receipt.public_id }}/review"><input type="hidden" name="decision" value="APPROVED"><button class="button small primary" type="submit">Approve</button></form>
+              <form method="post" action="/receipts/{{ receipt.public_id }}/review" class="receipt-deny-form"><input type="hidden" name="decision" value="DENIED"><input type="text" name="rejection_remarks" maxlength="1000" placeholder="Rejection remarks" aria-label="Rejection remarks" required><button class="button small danger" type="submit">Deny</button></form>
+            </div>
+            {% elif receipt.status == 'DENIED' %}<small>{{ receipt.rejection_remarks }}</small>
+            {% elif receipt.reviewed_by %}<small>By {{ receipt.reviewed_by.username }}</small>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="6" class="empty">No receipts match these filters.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

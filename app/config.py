@@ -107,6 +107,15 @@ class Settings:
             os.getenv("NODE_API_MAX_BODY_BYTES", str(5 * 1024 * 1024))
         )
         self.franchise_offline_minutes: int = int(os.getenv("FRANCHISE_OFFLINE_MINUTES", "15"))
+        self.sftp_sync_enabled: bool = _flag("SFTP_SYNC_ENABLED", "true")
+        self.sftp_exchange_root: str = os.getenv("SFTP_EXCHANGE_ROOT", "./data/sftp").strip()
+        self.sftp_sync_interval_seconds: int = max(
+            1, int(os.getenv("SFTP_SYNC_INTERVAL_SECONDS", "5"))
+        )
+        self.sftp_file_settle_seconds: int = max(0, int(os.getenv("SFTP_FILE_SETTLE_SECONDS", "2")))
+        self.sftp_max_xml_bytes: int = max(
+            1024, int(os.getenv("SFTP_MAX_XML_BYTES", str(10 * 1024 * 1024)))
+        )
 
     @property
     def using_default_secret(self) -> bool:

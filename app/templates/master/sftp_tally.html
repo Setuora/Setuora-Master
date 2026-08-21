@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Tally SFTP - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Two-way XML exchange</p>
+    <h1>Tally SFTP</h1>
+    <p class="muted">Central debtors and creditors received from isolated franchise folders.</p>
+  </div>
+  <a class="button" href="/franchises">Manage franchises</a>
+</section>
+
+<section class="metric-grid dashboard-metric-grid">
+  <article class="metric"><span>Debtors</span><strong>{{ debtor_count }}</strong></article>
+  <article class="metric"><span>Creditors</span><strong>{{ creditor_count }}</strong></article>
+  <article class="metric"><span>Files received</span><strong>{{ imports|length }}</strong></article>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Central parties</h2><span>Newest accepted ledger data wins.</span></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>GSTIN</th><th>Contact</th><th>Balances</th><th>Updated</th></tr></thead>
+      <tbody>
+        {% for party in parties %}
+        <tr>
+          <td><strong>{{ party.name }}</strong><small>{{ party.parent }}</small></td>
+          <td><span class="status synced">{{ party.party_type|title }}</span></td>
+          <td>{{ party.source_franchise.code }}</td>
+          <td>{{ party.gstin or '—' }}</td>
+          <td>{{ party.mobile or party.phone or party.email or '—' }}</td>
+          <td><small>Opening</small>{{ party.opening_balance or '—' }}<small>Closing</small>{{ party.closing_balance or '—' }}</td>
+          <td>{{ party.updated_at|report_date }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">No debtor or creditor XML has been imported yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Recent files</h2><span>Newest 100 import attempts.</span></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Received</th><th>Franchise</th><th>File</th><th>Status</th><th>Ledgers</th><th>Result</th></tr></thead>
+      <tbody>
+        {% for item in imports %}
+        <tr>
+          <td>{{ item.received_at|report_date }}</td>
+          <td>{{ item.franchise.code }}</td>
+          <td>{{ item.original_filename }}</td>
+          <td><span class="status {{ 'synced' if item.status == 'IMPORTED' else 'failed' }}">{{ item.status|title }}</span></td>
+          <td>{{ item.imported_count }}</td>
+          <td>{{ item.error or 'Accepted and consolidated' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty">No SFTP files have been processed.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

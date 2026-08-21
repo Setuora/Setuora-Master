@@ -25,6 +25,8 @@ from app.models import (
     Product,
     Role,
     Serial,
+    SftpTallyImport,
+    SftpTallyParty,
     StockTransfer,
     StockTransferItem,
     TransferStatus,
@@ -32,9 +34,9 @@ from app.models import (
 )
 from app.services.node_auth import (
     create_franchise_node,
-    provision_node_credential,
     rotate_node_credential,
 )
+from app.services.sftp_sync import normalize_franchise_code
 from app.services.tally import sync_batch
 from app.templates import templates
 
@@ -249,6 +251,37 @@ def franchises_page(
     )
 
 
+@router.get("/network/tally-parties")
+def sftp_tally_parties_page(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    parties = db.scalars(
+        select(SftpTallyParty)
+        .options(selectinload(SftpTallyParty.source_franchise))
+        .order_by(SftpTallyParty.name_key)
+    ).all()
+    imports = db.scalars(
+        select(SftpTallyImport)
+        .options(selectinload(SftpTallyImport.franchise))
+        .order_by(SftpTallyImport.received_at.desc())
+        .limit(100)
+    ).all()
+    return templates.TemplateResponse(
+        request,
+        "master/sftp_tally.html",
+        {
+            "request": request,
+            "user": user,
+            "parties": parties,
+            "imports": imports,
+            "debtor_count": sum(party.party_type == "DEBTOR" for party in parties),
+            "creditor_count": sum(party.party_type == "CREDITOR" for party in parties),
+        },
+    )
+
+
 def _render_franchises_with_result(
     request: Request,
     db: Session,
@@ -292,7 +325,8 @@ def create_franchise(
     try:
         if not code.strip() or not name.strip() or not location.strip():
             raise ValueError("Code, name, and location are required.")
-        node = create_franchise_node(
+        code = normalize_franchise_code(code)
+        create_franchise_node(
             db,
             code=code,
             name=name,
@@ -300,7 +334,6 @@ def create_franchise(
             tally_godown_name=tally_godown_name or None,
             commit=False,
         )
-        provisioned = provision_node_credential(db, node, commit=False)
         db.commit()
     except (ValueError, IntegrityError) as exc:
         db.rollback()
@@ -314,7 +347,7 @@ def create_franchise(
         request,
         db,
         user,
-        api_key=provisioned.api_key,
+        api_key=None,
     )
 
 

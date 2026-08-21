@@ -5,51 +5,41 @@
   <div>
     <p class="eyebrow">Node administration</p>
     <h1>Franchises</h1>
-    <p class="muted">Each Lite server receives its own revocable credential.</p>
+    <p class="muted">Each Tally franchise receives an isolated Windows SFTP folder.</p>
   </div>
 </section>
 
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-{% if api_key %}
-<div class="alert success">
-  <strong>Copy this API key now. It will not be shown again.</strong>
-  <code class="secret-once">{{ api_key }}</code>
-</div>
-{% endif %}
-
 <section class="panel">
-  <div class="section-title"><h2>Enroll franchise</h2><span>Choose the permanent code before any production QR is generated.</span></div>
+  <div class="section-title"><h2>Enroll franchise</h2><span>Use the same permanent code when creating its Windows SFTP account.</span></div>
   <form method="post" action="/franchises" class="grid-form compact">
-    <label>Permanent code<input name="code" maxlength="40" placeholder="BLR-01" required></label>
+    <label>Permanent code<input name="code" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" placeholder="BLR-01" required></label>
     <label>Franchise name<input name="name" maxlength="180" required></label>
     <label>Location<input name="location" maxlength="180" required></label>
     <label>Tally godown (optional)<input name="tally_godown_name" maxlength="180"></label>
-    <button class="button primary" type="submit">Enroll and create key</button>
+    <button class="button primary" type="submit">Enroll franchise</button>
   </form>
 </section>
 
 <section class="panel">
-  <div class="section-title"><h2>Enrolled nodes</h2><span>Rotating a key revokes every previous active key immediately.</span></div>
+  <div class="section-title"><h2>Enrolled franchises</h2><span>Run <code>setuora.ps1 sftp-add CODE</code> once on the Windows server for each code.</span></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Franchise</th><th>Location</th><th>Connection</th><th>Sequence</th><th>Tally godown</th><th>Credentials</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Franchise</th><th>Location</th><th>Last exchange</th><th>Sequence</th><th>Tally godown</th><th>SFTP user</th><th>Actions</th></tr></thead>
       <tbody>
         {% for node in nodes %}
         <tr>
           <td><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
           <td>{{ node.location }}</td>
           <td>
-            <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Online' if online_by_id[node.id] else 'Offline' }}</span>
-            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'Never connected' }}</small>
+            <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Recent' if online_by_id[node.id] else 'Waiting' }}</span>
+            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'No XML received' }}</small>
           </td>
           <td>{{ node.last_sequence }}</td>
           <td>{{ node.tally_godown_name or 'Not mapped' }}</td>
-          <td>{{ node.credentials|length }} issued</td>
+          <td><code>{{ node.code|lower }}</code></td>
           <td>
             {% if node.active %}
-            <form method="post" action="/franchises/{{ node.public_id }}/credentials">
-              <button class="button small" type="submit">Rotate key</button>
-            </form>
             <form method="post" action="/franchises/{{ node.public_id }}/status">
               <input type="hidden" name="active" value="false">
               <button class="button small danger" type="submit">Deactivate</button>

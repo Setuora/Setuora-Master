@@ -31,6 +31,7 @@ from app.routers import settings as settings_router
 from app.services.backup_worker import start_backup_worker, stop_backup_worker
 from app.services.bootstrap import bootstrap
 from app.services.schema import ensure_runtime_schema
+from app.services.sftp_sync_worker import start_sftp_sync_worker, stop_sftp_sync_worker
 from app.services.sync_worker import start_retry_worker, stop_retry_worker
 
 
@@ -47,11 +48,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bootstrap(db)
     start_retry_worker(app)
     start_backup_worker(app)
+    start_sftp_sync_worker(app)
     try:
         yield
     finally:
         await stop_retry_worker(app)
         await stop_backup_worker(app)
+        await stop_sftp_sync_worker(app)
 
 
 def create_app(app_mode: str | None = None) -> FastAPI:

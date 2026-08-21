@@ -119,7 +119,7 @@ class CSRFOriginMiddleware(BaseHTTPMiddleware):
             expected = request.headers.get("host")
             expected_authority = _authority(expected.split(",")[0] if expected else None)
             # Uvicorn accepts proxy headers only from the explicitly configured
-            # loopback Tailscale sidecar, so request.url.scheme is already the
+            # reviewed loopback reverse proxy, so request.url.scheme is already the
             # trusted external scheme.
             expected_scheme = request.url.scheme.lower()
             expected_port = 443 if expected_scheme == "https" else 80

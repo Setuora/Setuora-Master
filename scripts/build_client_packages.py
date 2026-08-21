@@ -1,15 +1,13 @@
-"""Build shareable Linux and Windows Setuora Master client packages."""
+"""Build the shareable Windows Setuora Master installer."""
 
 from __future__ import annotations
 
 import argparse
 import base64
 import hashlib
-import io
 import os
 import re
 import stat
-import tarfile
 import tempfile
 import textwrap
 import zipfile
@@ -20,26 +18,19 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "dist"
 RELEASE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 COMMON_FILES = (
-    ".dockerignore",
     ".env.example",
-    "Dockerfile",
-    "compose.yaml",
     "deploy.py",
     "requirements-runtime.lock",
     "client/CLIENT-README.md",
 )
 COMMON_DIRECTORIES = (
     "app",
-    "deployment/tailscale",
     "docs/deployment",
+    "scripts/windows",
 )
-LINUX_FILES = {
-    "client/linux/setuora": "setuora",
-}
 WINDOWS_FILES = {
     "client/windows/setuora.ps1": "setuora.ps1",
 }
-LINUX_HEADER = PROJECT_ROOT / "client/linux/self-extract-header.sh"
 WINDOWS_HEADER = PROJECT_ROOT / "client/windows/self-extract-header.cmd"
 
 
@@ -64,7 +55,7 @@ def _payload(platform_files: dict[str, str]) -> dict[str, Path]:
 def _release_text(version: str, platform: str) -> bytes:
     return (
         f"Setuora Master\nVersion: {version}\nPlatform: {platform}\n"
-        "Persistent data is stored in Docker volumes.\n"
+        "Persistent data is stored under C:\\ProgramData\\Setuora.\n"
     ).encode()
 
 
@@ -76,27 +67,6 @@ def _validate_payload(payload: dict[str, Path]) -> None:
             raise ValueError(f"Refusing to package private or generated path: {archive_name}")
         if not source.is_file():
             raise FileNotFoundError(source)
-
-
-def _write_tar(path: Path, root_name: str, payload: dict[str, Path], version: str) -> None:
-    with tarfile.open(path, "w:gz", format=tarfile.PAX_FORMAT) as archive:
-        for archive_name, source in sorted(payload.items()):
-            member_name = f"{root_name}/{archive_name}"
-            info = archive.gettarinfo(str(source), member_name)
-            info.uid = info.gid = 0
-            info.uname = info.gname = "root"
-            info.mtime = 0
-            if archive_name == "setuora":
-                info.mode = 0o755
-            with source.open("rb") as handle:
-                archive.addfile(info, handle)
-
-        release = _release_text(version, "Linux")
-        info = tarfile.TarInfo(f"{root_name}/RELEASE.txt")
-        info.size = len(release)
-        info.mode = 0o644
-        info.mtime = 0
-        archive.addfile(info, fileobj=io.BytesIO(release))
 
 
 def _write_zip(path: Path, root_name: str, payload: dict[str, Path], version: str) -> None:
@@ -121,32 +91,23 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_packages(version: str, output_directory: Path = DEFAULT_OUTPUT) -> tuple[Path, Path]:
+def build_package(version: str, output_directory: Path = DEFAULT_OUTPUT) -> Path:
     if not RELEASE_NAME.fullmatch(version):
         raise ValueError(
             "Version may contain only letters, numbers, dots, underscores, and hyphens."
         )
 
     output_directory.mkdir(parents=True, exist_ok=True)
-    linux_payload = _payload(LINUX_FILES)
     windows_payload = _payload(WINDOWS_FILES)
-    _validate_payload(linux_payload)
     _validate_payload(windows_payload)
 
-    linux_root = "Setuora-Master-linux"
     windows_root = "Setuora-Master-windows"
-    linux_path = output_directory / f"Setuora-Master-{version}-linux.run"
     windows_path = output_directory / f"Setuora-Master-{version}-windows.cmd"
 
     with tempfile.TemporaryDirectory(prefix="setuora-package-") as temporary_directory:
         temporary_path = Path(temporary_directory)
-        linux_payload_path = temporary_path / "payload.tar.gz"
         windows_payload_path = temporary_path / "payload.zip"
-        _write_tar(linux_payload_path, linux_root, linux_payload, version)
         _write_zip(windows_payload_path, windows_root, windows_payload, version)
-
-        linux_path.write_bytes(LINUX_HEADER.read_bytes() + linux_payload_path.read_bytes())
-        linux_path.chmod(0o755)
 
         encoded_payload = base64.b64encode(windows_payload_path.read_bytes()).decode("ascii")
         wrapped_payload = "\n".join(textwrap.wrap(encoded_payload, width=76)) + "\n"
@@ -154,10 +115,10 @@ def build_packages(version: str, output_directory: Path = DEFAULT_OUTPUT) -> tup
 
     checksum_path = output_directory / f"Setuora-Master-{version}-SHA256SUMS.txt"
     checksum_path.write_text(
-        f"{_sha256(linux_path)}  {linux_path.name}\n{_sha256(windows_path)}  {windows_path.name}\n",
+        f"{_sha256(windows_path)}  {windows_path.name}\n",
         encoding="utf-8",
     )
-    return linux_path, windows_path
+    return windows_path
 
 
 def main() -> int:
@@ -169,10 +130,9 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
-    linux_path, windows_path = build_packages(args.version, args.output.resolve())
-    print(linux_path)
+    windows_path = build_package(args.version, args.output.resolve())
     print(windows_path)
-    print(linux_path.parent / f"Setuora-Master-{args.version}-SHA256SUMS.txt")
+    print(windows_path.parent / f"Setuora-Master-{args.version}-SHA256SUMS.txt")
     return 0
 
 

@@ -2,8 +2,8 @@
   "name": "setuora-master-quality",
   "private": true,
   "scripts": {
-    "format": "prettier --write \"app/static/**/*.{js,css,svg}\" \"client/**/*.md\" \"docs/**/*.md\" README.md compose.yaml deployment/tailscale/serve.json",
-    "format:check": "prettier --check \"app/static/**/*.{js,css,svg}\" \"client/**/*.md\" \"docs/**/*.md\" README.md compose.yaml deployment/tailscale/serve.json"
+    "format": "prettier --write \"app/static/**/*.{js,css,svg}\" \"client/**/*.md\" \"docs/**/*.md\" README.md",
+    "format:check": "prettier --check \"app/static/**/*.{js,css,svg}\" \"client/**/*.md\" \"docs/**/*.md\" README.md"
   },
   "devDependencies": {
     "prettier": "3.9.6"

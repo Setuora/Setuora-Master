@@ -24,7 +24,8 @@
         {% endif %}
         {% if has_role(user, 'super_admin', 'admin') %}
         <a href="/network/events" class="{{ 'active' if request.url.path.startswith('/network/events') else '' }}">Movements</a>
-        <a href="/network/tally" class="{{ 'active' if request.url.path.startswith('/network/tally') else '' }}">Tally sync</a>
+        <a href="/network/tally" class="{{ 'active' if request.url.path == '/network/tally' or request.url.path.startswith('/network/tally/') else '' }}">Tally queue</a>
+        <a href="/network/tally-parties" class="{{ 'active' if request.url.path.startswith('/network/tally-parties') else '' }}">Tally SFTP</a>
         <a href="/franchises" class="{{ 'active' if request.url.path.startswith('/franchises') else '' }}">Franchises</a>
         {% if role_can(user, 'settings_edit') or role_can(user, 'tally_check_edit') or role_can(user, 'backup_data') or role_can(user, 'users_manage') or has_role(user, 'super_admin') %}
         <details class="nav-menu">

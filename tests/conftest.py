@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("SETUORA_APP_MODE", "master")
+os.environ.setdefault("SFTP_SYNC_ENABLED", "false")
 
 from app.database import Base
 

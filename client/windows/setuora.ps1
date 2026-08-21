@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet("setup", "preflight", "start", "stop", "status", "logs", "update")]
+    [ValidateSet("setup", "preflight", "start", "stop", "status", "logs", "update", "sftp-install", "sftp-add")]
     [string]$Command,
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
@@ -10,6 +10,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
+
+if ($Command -eq "sftp-install" -or $Command -eq "sftp-add") {
+    $script = Join-Path $PSScriptRoot "scripts\windows\configure-sftp.ps1"
+    if ($Command -eq "sftp-install") {
+        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $script -Action Install
+    } else {
+        if (-not $RemainingArguments -or $RemainingArguments.Count -ne 1) {
+            throw "Usage: setuora.ps1 sftp-add FRANCHISE-CODE"
+        }
+        & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $script `
+            -Action AddFranchise -FranchiseCode $RemainingArguments[0]
+    }
+    exit $LASTEXITCODE
+}
 
 function Get-SetuoraPython {
     $launchers = @(
@@ -37,19 +51,6 @@ Python 3.11 or newer is required.
 Install it from https://www.python.org/downloads/windows/ and select
 'Add python.exe to PATH', then run this launcher again.
 "@
-}
-
-if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
-    throw @"
-Docker Desktop is required.
-Install it from https://docs.docker.com/desktop/setup/install/windows-install/,
-start Docker Desktop, and then run this launcher again.
-"@
-}
-
-& docker compose version *> $null
-if ($LASTEXITCODE -ne 0) {
-    throw "Docker Compose v2 is required. Start or update Docker Desktop, then try again."
 }
 
 $python = Get-SetuoraPython

@@ -29,6 +29,7 @@ def test_master_composition_exposes_monitoring_and_node_api_only():
     assert "/network/transfers" in paths
     assert "/network/reports" in paths
     assert "/network/tally" in paths
+    assert "/network/tally-parties" in paths
     assert "/franchises" in paths
 
     assert "/batches" not in paths
@@ -81,6 +82,7 @@ def test_master_console_separates_monitor_and_sensitive_roles():
         assert client.get("/network/events").status_code == 403
         authenticate_client(client, 3)
         assert client.get("/network/events").status_code == 200
+        assert client.get("/network/tally-parties").status_code == 200
     finally:
         client.close()
         app.dependency_overrides.clear()

@@ -792,6 +792,76 @@ class FranchiseNode(Base):
     )
 
 
+class SftpTallyParty(Base):
+    """Latest centrally known Tally debtor or creditor master."""
+
+    __tablename__ = "sftp_tally_parties"
+    __table_args__ = (
+        UniqueConstraint("name_key", name="uq_sftp_tally_party_name_key"),
+        CheckConstraint(
+            "party_type IN ('DEBTOR', 'CREDITOR')",
+            name="ck_sftp_tally_party_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name_key: Mapped[str] = mapped_column(String(220), index=True)
+    name: Mapped[str] = mapped_column(String(220), index=True)
+    party_type: Mapped[str] = mapped_column(String(16), index=True)
+    parent: Mapped[str] = mapped_column(String(220))
+    opening_balance: Mapped[str] = mapped_column(String(80), default="")
+    closing_balance: Mapped[str] = mapped_column(String(80), default="")
+    mailing_name: Mapped[str] = mapped_column(String(220), default="")
+    addresses_json: Mapped[str] = mapped_column(Text, default="[]")
+    pincode: Mapped[str] = mapped_column(String(24), default="")
+    country: Mapped[str] = mapped_column(String(120), default="")
+    state: Mapped[str] = mapped_column(String(120), default="")
+    email: Mapped[str] = mapped_column(String(320), default="")
+    phone: Mapped[str] = mapped_column(String(80), default="")
+    mobile: Mapped[str] = mapped_column(String(80), default="")
+    gstin: Mapped[str] = mapped_column(String(32), default="")
+    source_franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    source_file_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True
+    )
+
+    source_franchise: Mapped[FranchiseNode] = relationship()
+
+
+class SftpTallyImport(Base):
+    """Idempotency and audit record for one franchise-uploaded XML file."""
+
+    __tablename__ = "sftp_tally_imports"
+    __table_args__ = (
+        UniqueConstraint(
+            "franchise_id",
+            "file_sha256",
+            name="uq_sftp_tally_import_franchise_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="CASCADE"),
+        index=True,
+    )
+    original_filename: Mapped[str] = mapped_column(String(255))
+    file_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    imported_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    franchise: Mapped[FranchiseNode] = relationship()
+
+
 class NodeCredential(Base):
     """A revocable node API key; the plaintext secret is never persisted."""
 

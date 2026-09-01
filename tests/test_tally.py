@@ -123,6 +123,15 @@ def test_sale_batch_xml_groups_serials_by_product(db_session):
     voucher = ET.fromstring(xml).find(".//VOUCHER")
     assert voucher is not None
     assert voucher.attrib["REMOTEID"]
+    assert voucher.attrib["OBJVIEW"] == "Invoice Voucher View"
+    assert voucher.findtext("ISINVOICE") == "Yes"
+    party_entry = voucher.find("LEDGERENTRIES.LIST")
+    assert party_entry is not None
+    assert party_entry.findtext("LEDGERNAME") == "SANGEETHA"
+    assert party_entry.findtext("ISPARTYLEDGER") == "Yes"
+    allocation = voucher.find(".//BATCHALLOCATIONS.LIST")
+    assert allocation is not None
+    assert allocation.findtext("GODOWNNAME") == "Main Location"
     assert build_voucher_xml(batch, VALID_SETTINGS) == xml
 
 

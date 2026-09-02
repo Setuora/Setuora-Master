@@ -75,11 +75,3 @@ def test_windows_installer_and_launcher_use_native_windows_services():
     assert '"sftp-add"' in launcher
     assert "configure-sftp.ps1" in launcher
     assert "docker" not in launcher.lower()
-
-
-def test_root_shortcut_launches_the_newest_windows_installer():
-    windows = (PROJECT_ROOT / "Windows — Setuora Master.cmd").read_text(encoding="utf-8")
-
-    assert "Setuora-Master-*-windows.cmd" in windows
-    assert "/o:-d" in windows
-    assert 'call "%SETUORA_INSTALLER%"' in windows

@@ -95,6 +95,27 @@ an administrator. The installer:
 Complete the [production release checklist](docs/deployment/production-release-checklist.md)
 before live use.
 
+### Windows source-checkout controls
+
+For a Windows source checkout used for development or direct server setup, run
+`setuora.bat` from the repository root (not the generated release installer).
+Run it without an argument for a menu, or use one of these commands:
+
+```bat
+setuora.bat setup
+setuora.bat start
+setuora.bat stop
+setuora.bat update
+```
+
+Run `setuora.bat setup` first, from an elevated Command Prompt or by
+right-clicking it and choosing **Run as administrator**. Run
+`setuora.bat update` elevated as well because it manages the native task
+lifecycle. These wrappers find the checkout's `deploy.py` and use Python
+3.11+; they are source-checkout/developer controls. For a production packaged
+installation, continue to use the installer procedure above and its installed
+`setuora.ps1` lifecycle script.
+
 ## Configuration
 
 Copy `.env.example` to `.env` for development. Production setup creates the

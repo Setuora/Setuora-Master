@@ -19,6 +19,25 @@ def test_active_deployment_is_windows_native_and_tailscale_free():
     assert "ForceCommand internal-sftp" in sftp
     assert "ChrootDirectory" in sftp
     assert "AllowTcpForwarding no" in sftp
+    assert "Match Group $groupMatchName" in sftp
+    assert "PermitTunnel" not in sftp
+    assert "X11Forwarding" not in sftp
+
+
+def test_sftp_setup_initializes_missing_openssh_files_before_reading_config():
+    sftp = (PROJECT_ROOT / "scripts" / "windows" / "configure-sftp.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function Initialize-OpenSshFiles" in sftp
+    assert 'Join-Path $openSshDirectory "sshd_config_default"' in sftp
+    assert "Copy-Item -LiteralPath $defaultConfigPath -Destination $configPath" in sftp
+    assert "Start-Service -Name sshd" in sftp
+    assert "& $sshKeygenPath -A" in sftp
+    assert sftp.index("Initialize-OpenSshFiles") < sftp.index(
+        "Get-Content -LiteralPath $configPath -Raw"
+    )
+    assert "& $sshdPath -t -f $configPath" in sftp
 
 
 def test_linux_and_previous_private_network_assets_are_archived():

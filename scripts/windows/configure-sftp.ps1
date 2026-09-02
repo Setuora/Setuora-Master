@@ -12,7 +12,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $groupName = "SetuoraSftpUsers"
+$groupMatchName = $groupName.ToLowerInvariant()
 $configPath = "$env:ProgramData\ssh\sshd_config"
+$openSshDirectory = Join-Path $env:WINDIR "System32\OpenSSH"
+$defaultConfigPath = Join-Path $openSshDirectory "sshd_config_default"
+$sshdPath = Join-Path $openSshDirectory "sshd.exe"
+$sshKeygenPath = Join-Path $openSshDirectory "ssh-keygen.exe"
 $managedStart = "# BEGIN SETUORA SFTP"
 $managedEnd = "# END SETUORA SFTP"
 
@@ -34,11 +39,51 @@ if (-not (Test-Administrator)) {
     exit $process.ExitCode
 }
 
+function Initialize-OpenSshFiles {
+    if (-not (Test-Path -LiteralPath $sshdPath -PathType Leaf)) {
+        throw "OpenSSH Server is installed but sshd.exe is unavailable. Restart Windows, then run Setuora setup again."
+    }
+
+    $configDirectory = Split-Path -Parent $configPath
+    New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        if (Test-Path -LiteralPath $defaultConfigPath -PathType Leaf) {
+            Copy-Item -LiteralPath $defaultConfigPath -Destination $configPath
+        } else {
+            # Microsoft documents that the sshd service creates its default
+            # configuration on first start. This fallback also supports newer
+            # OpenSSH packages that do not ship sshd_config_default.
+            Write-Host "Initializing the Windows OpenSSH server configuration..."
+            $service = Get-Service -Name sshd -ErrorAction Stop
+            if ($service.Status -eq "Running") {
+                Restart-Service -Name sshd
+            } else {
+                Start-Service -Name sshd
+            }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        throw "Windows OpenSSH did not create $configPath. Restart Windows, then run Setuora setup again."
+    }
+
+    if (-not (Test-Path -LiteralPath $sshKeygenPath -PathType Leaf)) {
+        throw "OpenSSH Server is installed but ssh-keygen.exe is unavailable. Restart Windows, then run Setuora setup again."
+    }
+    & $sshKeygenPath -A
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows OpenSSH could not initialize its server host keys."
+    }
+}
+
 function Install-SetuoraSftp {
     $capability = Get-WindowsCapability -Online -Name "OpenSSH.Server~~~~0.0.1.0"
     if ($capability.State -ne "Installed") {
         Add-WindowsCapability -Online -Name "OpenSSH.Server~~~~0.0.1.0" | Out-Null
     }
+
+    Initialize-OpenSshFiles
 
     New-Item -ItemType Directory -Path (Join-Path $ExchangeRoot "franchises") -Force | Out-Null
     if (-not (Get-LocalGroup -Name $groupName -ErrorAction SilentlyContinue)) {
@@ -48,13 +93,11 @@ function Install-SetuoraSftp {
     $rootForSsh = $ExchangeRoot.Replace("\", "/")
     $block = @"
 $managedStart
-Match Group $groupName
+Match Group $groupMatchName
     ChrootDirectory $rootForSsh/franchises/%u
     ForceCommand internal-sftp -d /inbox
     PasswordAuthentication yes
     AllowTcpForwarding no
-    PermitTunnel no
-    X11Forwarding no
 $managedEnd
 "@
     $config = Get-Content -LiteralPath $configPath -Raw
@@ -66,7 +109,7 @@ $managedEnd
     }
     Set-Content -LiteralPath $configPath -Value $config -Encoding ascii
 
-    & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
+    & $sshdPath -t -f $configPath
     if ($LASTEXITCODE -ne 0) {
         Copy-Item -LiteralPath $backup -Destination $configPath -Force
         throw "OpenSSH rejected the Setuora configuration; the previous file was restored."

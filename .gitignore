@@ -12,6 +12,7 @@ data/*.db-wal
 data/backups/
 data/schema-backups/
 data/secret_key
+data/sftp/
 .pytest_cache/
 .ruff_cache/
 .coverage

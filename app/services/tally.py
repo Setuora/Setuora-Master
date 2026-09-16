@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import socket
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from http.client import HTTPException
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
@@ -56,11 +58,13 @@ class TallySyncError(RuntimeError):
         retryable: bool = True,
         request_xml: str | None = None,
         response_xml: str | None = None,
+        outcome_unknown: bool = False,
     ):
         super().__init__(message)
         self.retryable = retryable
         self.request_xml = request_xml
         self.response_xml = response_xml
+        self.outcome_unknown = outcome_unknown
 
 
 @dataclass
@@ -195,7 +199,11 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
             retryable=False,
         )
     sales_gst_mappings = parse_sales_gst_ledger_mappings(settings.get("sales_gst_ledger_mappings"))
-    stock_location = settings.get("tally_stock_location", "").strip() or "Main Location"
+    stock_location = (
+        (batch.tally_stock_location or "").strip()
+        or settings.get("tally_stock_location", "").strip()
+        or "Main Location"
+    )
 
     def sales_ledgers(gst_rate: Decimal) -> dict[str, str]:
         key = gst_rate_key(gst_rate)
@@ -384,10 +392,26 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
         # build_tally_url fixes the scheme and rejects URL syntax in the host.
         with urlopen(request, timeout=5) as response:  # nosec B310
             response_xml = read_tally_response(response)
-    except (URLError, OSError) as exc:
-        raise TallySyncError("Tally connection failed", retryable=True, request_xml=xml) from exc
+    except (URLError, OSError, HTTPException) as exc:
+        reason = exc.reason if isinstance(exc, URLError) else exc
+        # Only a definite failure to connect proves that Tally never saw the
+        # voucher. Timeouts/disconnects can happen after a successful import.
+        not_connected = isinstance(reason, (ConnectionRefusedError, socket.gaierror))
+        message = (
+            "Tally connection failed"
+            if not_connected
+            else "Tally import outcome is unknown. Check the voucher in Tally before retrying."
+        )
+        raise TallySyncError(
+            message,
+            retryable=not_connected,
+            request_xml=xml,
+            outcome_unknown=not not_connected,
+        ) from exc
     except ValueError as exc:
-        raise TallySyncError(str(exc), retryable=False, request_xml=xml) from exc
+        raise TallySyncError(
+            str(exc), retryable=False, request_xml=xml, outcome_unknown=True
+        ) from exc
 
     try:
         root = safe_fromstring(response_xml)
@@ -397,16 +421,12 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
             retryable=False,
             request_xml=xml,
             response_xml=response_xml,
+            outcome_unknown=True,
         ) from exc
 
     errors = [
         node.text for node in root.iter() if node.tag.upper().endswith("LINEERROR") and node.text
     ]
-    if errors:
-        raise TallySyncError(
-            "; ".join(errors), retryable=False, request_xml=xml, response_xml=response_xml
-        )
-
     created = next(
         (node.text for node in root.iter() if node.tag.upper().endswith("CREATED")), None
     )
@@ -420,14 +440,42 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
         except (TypeError, ValueError):
             return 0
 
+    if errors:
+        raise TallySyncError(
+            "; ".join(errors),
+            retryable=False,
+            request_xml=xml,
+            response_xml=response_xml,
+            outcome_unknown=_as_int(created) + _as_int(altered) > 0,
+        )
+
     # A 200 response can still mean Tally imported nothing.
     exceptions = next(
         (node.text for node in root.iter() if node.tag.upper().endswith("EXCEPTIONS")), None
     )
+    error_count = next(
+        (node.text for node in root.iter() if node.tag.upper().endswith("ERRORS")), None
+    )
+    if _as_int(created) + _as_int(altered) > 0 and (
+        _as_int(exceptions) > 0 or _as_int(error_count) > 0
+    ):
+        raise TallySyncError(
+            "Tally reported both an import and errors. Check the voucher in Tally before retrying.",
+            retryable=False,
+            request_xml=xml,
+            response_xml=response_xml,
+            outcome_unknown=True,
+        )
     if _as_int(created) + _as_int(altered) < 1:
         detail = f"Tally created/altered nothing (CREATED={created or 0}, ALTERED={altered or 0}"
         detail += f", EXCEPTIONS={exceptions})" if exceptions is not None else ")"
-        raise TallySyncError(detail, retryable=False, request_xml=xml, response_xml=response_xml)
+        raise TallySyncError(
+            detail,
+            retryable=False,
+            request_xml=xml,
+            response_xml=response_xml,
+            outcome_unknown=created is None and altered is None,
+        )
 
     reference = f"CREATED={created or 0}; ALTERED={altered or 0}"
     return TallyResult(request_xml=xml, response_xml=response_xml, reference=reference)
@@ -440,7 +488,25 @@ _SYNC_LOCK = threading.Lock()
 def sync_batch(db: Session, batch: Batch) -> None:
     with _SYNC_LOCK:
         current_status = db.scalar(select(Batch.status).where(Batch.id == batch.id))
-        if current_status in {BatchStatus.SYNCED.value, BatchStatus.CLOSED.value}:
+        if current_status in {
+            BatchStatus.SYNCED.value,
+            BatchStatus.CLOSED.value,
+            BatchStatus.REVIEW_REQUIRED.value,
+        }:
+            return
+        # Master has one configured central company. Hold its queue while an
+        # earlier import needs reconciliation, including manual Retry actions.
+        if db.scalar(
+            select(Batch.id).where(Batch.status == BatchStatus.REVIEW_REQUIRED.value).limit(1)
+        ):
+            return
+        interrupted = db.scalar(
+            select(Batch)
+            .where(Batch.status == BatchStatus.SYNCING.value, Batch.id != batch.id)
+            .limit(1)
+        )
+        if interrupted is not None:
+            _sync_batch_locked(db, interrupted)
             return
         if current_status != batch.status:
             db.refresh(batch)
@@ -458,6 +524,23 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
         and sync_started_at is not None
         and sync_started_at > stale_before
     ):
+        return
+    if batch.status == BatchStatus.SYNCING.value:
+        batch.status = BatchStatus.REVIEW_REQUIRED.value
+        batch.last_error = (
+            "The previous import was interrupted and its outcome is unknown. "
+            "Check the voucher in Tally before resuming the queue."
+        )
+        batch.sync_started_at = None
+        db.add(
+            SyncAttempt(
+                batch_id=batch.id,
+                status=batch.status,
+                request_xml=batch.sync_request_xml,
+                error=batch.last_error,
+            )
+        )
+        db.commit()
         return
 
     is_retry = batch.status in {
@@ -553,7 +636,9 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
         result = post_to_tally(xml, settings)
     except TallySyncError as exc:
         batch.status = (
-            BatchStatus.PENDING_SYNC.value
+            BatchStatus.REVIEW_REQUIRED.value
+            if exc.outcome_unknown
+            else BatchStatus.PENDING_SYNC.value
             if exc.retryable
             and claim_status != BatchStatus.FAILED.value
             and batch.retry_count < MAX_AUTOMATIC_TALLY_RETRIES
@@ -577,3 +662,41 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     attempt.request_xml = result.request_xml
     attempt.response_xml = result.response_xml
     db.commit()
+
+
+def reconcile_batch(
+    db: Session,
+    batch: Batch,
+    *,
+    imported: bool,
+    reference: str = "",
+    actor: str,
+) -> None:
+    """Record an operator's Tally check without guessing whether a POST succeeded."""
+    reference = reference.strip()
+    if imported and (not reference or len(reference) > 180):
+        raise ValueError("Enter the verified Tally voucher reference.")
+    with _SYNC_LOCK:
+        db.refresh(batch)
+        if batch.status != BatchStatus.REVIEW_REQUIRED.value:
+            raise ValueError("This voucher no longer requires reconciliation.")
+        batch.status = BatchStatus.SYNCED.value if imported else BatchStatus.PENDING_SYNC.value
+        batch.last_error = None
+        batch.sync_started_at = None
+        if imported:
+            batch.tally_reference = reference
+            batch.synced_at = utc_now()
+            update_transaction_references(db, batch)
+        else:
+            # Keep the exact request and REMOTEID when an operator confirms
+            # absence. A later product/configuration edit must not change it.
+            batch.retry_count = 0
+        db.add(
+            SyncAttempt(
+                batch_id=batch.id,
+                status=batch.status,
+                request_xml=batch.sync_request_xml,
+                error=f"Reconciled by {actor}: voucher {'present in' if imported else 'absent from'} Tally.",
+            )
+        )
+        db.commit()

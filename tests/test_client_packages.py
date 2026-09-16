@@ -41,6 +41,7 @@ def test_package_builder_creates_safe_complete_windows_installer(tmp_path):
     with zipfile.ZipFile(io.BytesIO(windows_payload)) as archive:
         members = set(archive.namelist())
     assert f"{windows_root}/setuora.ps1" in members
+    assert f"{windows_root}/setuora.bat" in members
     assert f"{windows_root}/app/main.py" in members
     assert f"{windows_root}/scripts/windows/configure-sftp.ps1" in members
     assert f"{windows_root}/scripts/windows/run-server.cmd" in members
@@ -75,3 +76,41 @@ def test_windows_installer_and_launcher_use_native_windows_services():
     assert '"sftp-add"' in launcher
     assert "configure-sftp.ps1" in launcher
     assert "docker" not in launcher.lower()
+
+
+def test_installer_validates_payload_before_stopping_existing_service():
+    header = (PROJECT_ROOT / "client/windows/self-extract-header.cmd").read_text(encoding="utf-8")
+    assert header.index("Expand-Archive") < header.index("$launcher stop")
+    assert header.index("$launcher preflight") < header.index("$launcher stop")
+    assert header.index("$launcher stop") < header.index("Copy-Item")
+    assert "Start-Process -FilePath $env:SETUORA_SELF -Verb RunAs -Wait -PassThru" in header
+    assert "exit $process.ExitCode" in header
+    assert "net session" not in header
+
+
+def test_packaged_launcher_can_bootstrap_python_and_reuse_existing_runtime():
+    launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
+    assert "Python.Python.3.11" in launcher
+    assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
+    assert '$Action -eq "setup"' in launcher
+    assert "Install-SetuoraPython" in launcher
+
+
+def test_installer_invalidates_only_application_bytecode_after_update_copy():
+    header = (PROJECT_ROOT / "client/windows/self-extract-header.cmd").read_text(encoding="utf-8")
+    cleanup = "Get-ChildItem -LiteralPath (Join-Path $target 'app')"
+    assert header.index("$launcher stop") < header.index("Copy-Item")
+    assert header.index("Copy-Item") < header.index(cleanup) < header.index("$launcher update")
+    assert "-Directory -Filter '__pycache__' -Recurse -Force" in header
+    assert "Remove-Item -LiteralPath $cache.FullName -Recurse -Force" in header
+    assert "Remove-Item -LiteralPath $target" not in header
+
+
+def test_python_probe_recovers_from_missing_launcher_versions():
+    launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
+    probe = launcher[launcher.index("$probePreference =") : launcher.index("if ($supported)")]
+    assert '$ErrorActionPreference = "Continue"' in probe
+    assert probe.index('$ErrorActionPreference = "Continue"') < probe.index("& $name @prefix")
+    assert "$supported = $LASTEXITCODE -eq 0" in probe
+    assert "finally" in probe
+    assert "$ErrorActionPreference = $probePreference" in probe

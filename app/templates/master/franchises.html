@@ -3,30 +3,59 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Node administration</p>
+    <p class="eyebrow">Setuora Master</p>
     <h1>Franchises</h1>
-    <p class="muted">Each Lite franchise connects to this Master with its own node credential.</p>
+    <p class="muted">Add a franchise here, copy its connection details, then paste them into Lite. Each franchise gets its own node credential. Tally stays on Master.</p>
   </div>
 </section>
 
-{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
-{% if api_key %}<div class="alert success">New node credential: <code>{{ api_key }}</code>. Copy it into this franchise's Lite Master connection now; it will not be shown again.</div>{% endif %}
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
+{% if setup_details %}
+<section class="panel" aria-labelledby="connection-ready">
+  <h2 id="connection-ready">Connect {{ connection_node.name }} to Master</h2>
+  <ol>
+    <li>Copy the connection details below.</li>
+    <li>On this franchise's Lite, open <strong>Admin → Master connection</strong>.</li>
+    <li>Paste them and select <strong>Connect to Master</strong>. Lite checks the connection and starts the first inventory sync.</li>
+  </ol>
+  <label for="lite-setup-details">Connection details for {{ connection_node.code }}</label>
+  <textarea id="lite-setup-details" rows="8" readonly spellcheck="false" autocomplete="off">{{ setup_details }}</textarea>
+  <div class="actions">
+    <button class="button primary" type="button" data-copy-setup>Copy connection details</button>
+    <span data-copy-status role="status" aria-live="polite"></span>
+  </div>
+  <p class="muted">These details contain a private access key and are shown only once. Give them only to this franchise's administrator. If you close this page before copying, create replacement details below.</p>
+</section>
+{% endif %}
+
 <section class="panel">
-  <div class="section-title"><h2>Enroll franchise</h2><span>Use this permanent code when configuring its Lite server.</span></div>
-  <form method="post" action="/franchises" class="grid-form compact">
-    <label>Permanent code<input name="code" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" placeholder="BLR-01" required></label>
-    <label>Franchise name<input name="name" maxlength="180" required></label>
-    <label>Location<input name="location" maxlength="180" required></label>
-    <label>Tally godown (optional)<input name="tally_godown_name" maxlength="180"></label>
-    <button class="button primary" type="submit">Enroll franchise</button>
+  <div class="section-title"><h2>1. Master address</h2><span>Set this once for your Lite servers.</span></div>
+  <p>Use the HTTPS address supplied by your server administrator, for example <strong>https://master.yourcompany.com</strong>. It must already be reachable from Lite. Saving it here does not configure the server's network or certificate.</p>
+  <form method="post" action="/franchises/connection-address" class="stack">
+    <label>Master HTTPS address<input name="master_url" type="url" value="{{ master_url }}" placeholder="https://master.yourcompany.com" required autocomplete="url"></label>
+    <div><button class="button" type="submit">Save Master address</button></div>
   </form>
+  {% if master_url %}<p class="muted">Changing this address affects new connection details. Existing Lite installations keep their saved address.</p>{% endif %}
 </section>
 
 <section class="panel">
-  <div class="section-title"><h2>Enrolled franchises</h2><span>Issue a separate node credential for each Lite.</span></div>
+  <div class="section-title"><h2>2. Add a franchise</h2><span>One entry for each independent Lite server.</span></div>
+  <form method="post" action="/franchises" class="grid-form">
+    <label>Permanent franchise code<input name="code" value="{{ form_values.get('code', '') }}" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" placeholder="BLR-01" required><small>Use letters, numbers, hyphens or underscores. This identifies its stock and cannot be changed later.</small></label>
+    <label>Franchise name<input name="name" value="{{ form_values.get('name', '') }}" maxlength="180" placeholder="Bengaluru warehouse" required></label>
+    <label>Location<input name="location" value="{{ form_values.get('location', '') }}" maxlength="180" placeholder="Bengaluru" required></label>
+    <label>Tally godown (optional)<input name="tally_godown_name" value="{{ form_values.get('tally_godown_name', '') }}" maxlength="180"><small>Use the exact godown name in central Tally, or leave blank to use Master's default.</small></label>
+    <div class="span-all"><button class="button primary" type="submit" {% if not master_url %}disabled{% endif %}>Add franchise &amp; get connection details</button></div>
+  </form>
+  {% if not master_url %}<p class="muted">Save the Master address above to continue.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Existing franchises</h2><span>Manage connections and access.</span></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Franchise</th><th>Location</th><th>Last event</th><th>Sequence</th><th>Tally godown</th><th>Credentials</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Franchise</th><th>Location</th><th>Last connection</th><th>Sequence</th><th>Tally godown</th><th>Credentials</th><th>Actions</th></tr></thead>
       <tbody>
         {% for node in nodes %}
         <tr>
@@ -34,25 +63,36 @@
           <td>{{ node.location }}</td>
           <td>
             <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Recent' if online_by_id[node.id] else 'Waiting' }}</span>
-            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'No event received' }}</small>
+            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'Waiting for Lite to connect' }}</small>
           </td>
           <td>{{ node.last_sequence }}</td>
-          <td>{{ node.tally_godown_name or 'Not mapped' }}</td>
+          <td>{{ node.tally_godown_name or 'Use Master default' }}</td>
           <td>
+            {% if node.active %}
+            <details>
+              <summary>Replace connection details</summary>
+              <p>Use this if the details were lost or the access key needs to change.</p>
             <form method="post" action="/franchises/{{ node.public_id }}/credentials">
-              <button class="button small" type="submit">Issue / rotate</button>
+              <label class="checkline"><input name="confirm_replace" type="checkbox" value="true" required> I will update this franchise's Lite with the new details. Its current access key will stop working.</label>
+              <button class="button small" type="submit" {% if not master_url %}disabled{% endif %}>Create replacement details</button>
             </form>
+            </details>
+            {% else %}<small>Enable access, then create replacement connection details.</small>{% endif %}
           </td>
           <td>
             {% if node.active %}
+            <details>
+              <summary>Disable access</summary>
             <form method="post" action="/franchises/{{ node.public_id }}/status">
               <input type="hidden" name="active" value="false">
-              <button class="button small danger" type="submit">Deactivate</button>
+              <label class="checkline"><input name="confirm_deactivate" type="checkbox" value="true" required> Stop this franchise connecting and invalidate its current connection details.</label>
+              <button class="button small danger" type="submit">Disable access</button>
             </form>
+            </details>
             {% else %}
             <form method="post" action="/franchises/{{ node.public_id }}/status">
               <input type="hidden" name="active" value="true">
-              <button class="button small" type="submit">Reactivate</button>
+              <button class="button small" type="submit">Enable access</button>
             </form>
             {% endif %}
           </td>
@@ -64,4 +104,5 @@
     </table>
   </div>
 </section>
+<script src="/static/lite-connection.js?v=20260916"></script>
 {% endblock %}

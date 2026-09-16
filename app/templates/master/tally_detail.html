@@ -10,6 +10,24 @@
     {% endif %}
   </div>
 </section>
+{% if batch.status == 'REVIEW_REQUIRED' %}
+<section class="panel">
+  <h2>Verify this voucher in Tally</h2>
+  <p>The import result could not be confirmed. The central Tally queue is paused to prevent duplicate vouchers. Search Tally for voucher {{ batch.batch_number }} before choosing a result below.</p>
+  {% if has_role(user, 'super_admin', 'admin') %}
+  <form method="post" action="/network/tally/{{ batch.id }}/reconcile">
+    <input type="hidden" name="resolution" value="imported">
+    <label>Verified Tally voucher reference<input name="tally_reference" maxlength="180" required></label>
+    <button class="button primary" type="submit">Confirm voucher exists</button>
+  </form>
+  <form method="post" action="/network/tally/{{ batch.id }}/reconcile">
+    <input type="hidden" name="resolution" value="absent">
+    <label><input type="checkbox" name="confirmed_absent" value="true" required> I checked Tally and this voucher was not imported.</label>
+    <button class="button" type="submit">Queue verified missing voucher</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
 <section class="panel">
   <dl class="details">
     <dt>Status</dt><dd><span class="status {{ batch.status|lower }}">{{ batch.status|replace('_', ' ')|title }}</span></dd>

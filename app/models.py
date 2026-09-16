@@ -153,6 +153,7 @@ class BatchStatus(str, Enum):
     SYNCED = "SYNCED"
     PENDING_SYNC = "PENDING_SYNC"
     FAILED = "FAILED"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
     CLOSED = "CLOSED"
 
 
@@ -407,6 +408,7 @@ class Batch(Base):
     status: Mapped[str] = mapped_column(String(40), default=BatchStatus.DRAFT.value, index=True)
     tally_voucher_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     tally_voucher_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tally_stock_location: Mapped[str | None] = mapped_column(String(180), nullable=True)
     tally_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -445,6 +447,7 @@ class BatchItem(Base):
     serial_id: Mapped[int] = mapped_column(ForeignKey("serials.id"))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sales_discount_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     fefo_picked: Mapped[bool] = mapped_column(Boolean, default=False)
     shelf_location_id: Mapped[int | None] = mapped_column(

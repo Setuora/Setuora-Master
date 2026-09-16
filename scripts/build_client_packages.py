@@ -18,6 +18,7 @@ DEFAULT_OUTPUT = PROJECT_ROOT / "dist"
 RELEASE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 COMMON_FILES = (
+    "setuora.bat",
     ".env.example",
     "deploy.py",
     "requirements-runtime.lock",

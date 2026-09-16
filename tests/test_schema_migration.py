@@ -36,6 +36,7 @@ def test_runtime_schema_adds_sale_gst_columns_to_batches(tmp_path):
         "gst_cgst_rate",
         "gst_sgst_rate",
         "gst_igst_rate",
+        "tally_stock_location",
     } <= columns
 
 
@@ -162,6 +163,7 @@ def test_inventory_table_rebuild_preserves_rows_and_adds_all_foreign_keys(tmp_pa
                 serial_id=serial.id,
                 shelf_location_id=location.id,
                 shelf_verified_by_id=user.id,
+                sales_discount_rate=10,
             )
         )
         db.commit()
@@ -185,6 +187,7 @@ def test_inventory_table_rebuild_preserves_rows_and_adds_all_foreign_keys(tmp_pa
     with engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM serials")) == 1
         assert connection.scalar(text("SELECT count(*) FROM batch_items")) == 1
+        assert connection.scalar(text("SELECT sales_discount_rate FROM batch_items")) == 10
         assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
 
     assert {

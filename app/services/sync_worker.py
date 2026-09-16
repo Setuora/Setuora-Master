@@ -34,8 +34,11 @@ def retry_pending_batches(limit: int = 10) -> int:
                     (
                         (Batch.status == BatchStatus.SYNCING.value)
                         & (
-                            Batch.sync_started_at
-                            < utc_now() - timedelta(minutes=SYNC_LEASE_MINUTES)
+                            (Batch.sync_started_at.is_(None))
+                            | (
+                                Batch.sync_started_at
+                                < utc_now() - timedelta(minutes=SYNC_LEASE_MINUTES)
+                            )
                         )
                     ),
                 ),

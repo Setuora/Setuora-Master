@@ -13,10 +13,26 @@ task, starts it, and verifies the local health endpoint. It does not expose a
 public service or install Docker.
 
 Configure a reviewed HTTPS reverse proxy that exposes only `/api/v1` to Lite
-servers. Keep the Master admin console and central Tally gateway private. In
-the web console, enroll each franchise and issue a separate node credential.
-Each Lite needs its franchise code, Master HTTPS origin, and credential.
+servers, with working public DNS and a valid certificate. Keep the Master
+admin console and central Tally gateway private. The installer does not
+configure this public HTTPS access.
 
-Run a newer `.cmd` installer to update. The updater preserves `.env`, the
-database, and backups. The HTTPS proxy has a separate configuration and
-backup lifecycle.
+Open **Franchises** (`/franchises`) in the Master web console and save the
+public Master HTTPS address once. Add each franchise with its permanent code
+and Tally godown. Master creates its first credential automatically. Select
+**Copy connection details** and transfer the copied JSON securely to that
+Lite administrator. On Lite, paste it into **Admin → Master connection** and
+select **Connect to Master**. Lite verifies the connection, initializes its
+inventory baseline once, and starts synchronization. Tally runs only at Master.
+
+Double-click
+`C:\ProgramData\Setuora\Setuora-Master-windows\setuora.bat` for the controls
+menu: browser, start/stop, status, setup/repair, update, logs, and configuration
+checks. Closing the menu leaves Setuora running. Actions requiring
+Administrator access open a visible console after Windows approval.
+
+Choose **Install downloaded update** and select a newer Master `.cmd`
+installer, or run that installer directly. The updater preserves `.env`, the
+database, and backups. The HTTPS proxy is configured and backed up separately.
+
+See the [installation guide](docs/deployment/installation-guide.md).

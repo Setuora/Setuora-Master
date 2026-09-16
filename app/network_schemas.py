@@ -26,7 +26,7 @@ class NetworkEventType(str, Enum):
 class NetworkEventItem(BaseModel):
     """The complete product/QR snapshot carried with every stock event."""
 
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
 
     serial_number: str = Field(min_length=1, max_length=140)
     product_code: str = Field(min_length=1, max_length=80)
@@ -36,6 +36,7 @@ class NetworkEventItem(BaseModel):
     gst_rate: float = Field(ge=0, le=100)
     unit: str = Field(min_length=1, max_length=40)
     rate: float = Field(ge=0)
+    sales_discount_rate: float = Field(default=0, ge=0, le=100)
     status: str = Field(min_length=1, max_length=40)
     product_batch_number: str | None = Field(default=None, max_length=80)
     mfg_date: date | None = None
@@ -55,7 +56,7 @@ class NetworkEventItem(BaseModel):
 
 
 class NetworkEventV1(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
 
     event_id: UUID
     sequence: int = Field(ge=1)

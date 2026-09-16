@@ -32,12 +32,19 @@ from app.models import (
     TransferStatus,
     utc_now,
 )
+from app.services.lite_connection import (
+    MASTER_URL_SETTING,
+    connection_details,
+    normalize_master_url,
+    validate_franchise_code,
+)
 from app.services.node_auth import (
     create_franchise_node,
+    provision_node_credential,
     rotate_node_credential,
 )
-from app.services.sftp_sync import normalize_franchise_code
-from app.services.tally import sync_batch
+from app.services.settings import get_setting, update_settings
+from app.services.tally import reconcile_batch, sync_batch
 from app.templates import templates
 
 router = APIRouter()
@@ -185,7 +192,9 @@ def master_dashboard(request: Request, db: Session = Depends(get_db)):
         )
         or 0,
         "failed_tally": db.scalar(
-            select(func.count(Batch.id)).where(Batch.status == BatchStatus.FAILED.value)
+            select(func.count(Batch.id)).where(
+                Batch.status.in_({BatchStatus.FAILED.value, BatchStatus.REVIEW_REQUIRED.value})
+            )
         )
         or 0,
         "open_transfers": db.scalar(
@@ -230,25 +239,7 @@ def franchises_page(
     db: Session = Depends(get_db),
 ):
     user = require_user(request, db, roles=ADMIN_ROLES)
-    nodes = db.scalars(
-        select(FranchiseNode)
-        .order_by(FranchiseNode.code)
-        .options(selectinload(FranchiseNode.credentials))
-    ).all()
-    return templates.TemplateResponse(
-        request,
-        "master/franchises.html",
-        {
-            "request": request,
-            "user": user,
-            "nodes": nodes,
-            "online_by_id": {node.id: _is_online(node) for node in nodes},
-            "created": created,
-            "rotated": rotated,
-            "api_key": None,
-            "error": None,
-        },
-    )
+    return _render_franchises_with_result(request, db, user)
 
 
 @router.get("/network/tally-parties")
@@ -288,13 +279,24 @@ def _render_franchises_with_result(
     user,
     *,
     api_key: str | None = None,
+    connection_node: FranchiseNode | None = None,
     error: str | None = None,
+    message: str | None = None,
+    form_values: dict[str, str] | None = None,
 ):
     nodes = db.scalars(
         select(FranchiseNode)
         .order_by(FranchiseNode.code)
         .options(selectinload(FranchiseNode.credentials))
     ).all()
+    master_url = get_setting(db, MASTER_URL_SETTING)
+    setup_details = None
+    if api_key and connection_node and master_url:
+        setup_details = connection_details(
+            master_url=master_url,
+            franchise_code=connection_node.code,
+            node_credential=api_key,
+        )
     return templates.TemplateResponse(
         request,
         "master/franchises.html",
@@ -306,9 +308,38 @@ def _render_franchises_with_result(
             "created": "",
             "rotated": "",
             "api_key": api_key,
+            "master_url": master_url,
+            "setup_details": setup_details,
+            "connection_node": connection_node,
+            "message": message,
+            "form_values": form_values or {},
             "error": error,
         },
         status_code=400 if error else 200,
+        # no-referrer makes browsers send Origin: null on subsequent form POSTs,
+        # which correctly fails our CSRF check. Keep same-origin form submissions
+        # working while withholding referrers from other origins.
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "same-origin"},
+    )
+
+
+@router.post("/franchises/connection-address")
+def save_lite_connection_address(
+    request: Request,
+    master_url: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    try:
+        normalized = normalize_master_url(master_url)
+    except ValueError as exc:
+        return _render_franchises_with_result(request, db, user, error=str(exc))
+    update_settings(db, {MASTER_URL_SETTING: normalized})
+    return _render_franchises_with_result(
+        request,
+        db,
+        user,
+        message="Master address saved. Add a franchise below to create its Lite connection details.",
     )
 
 
@@ -322,11 +353,23 @@ def create_franchise(
     db: Session = Depends(get_db),
 ):
     user = require_user(request, db, roles=ADMIN_ROLES)
+    form_values = {
+        "code": code,
+        "name": name,
+        "location": location,
+        "tally_godown_name": tally_godown_name,
+    }
     try:
+        if not get_setting(db, MASTER_URL_SETTING):
+            raise ValueError("Save the Master HTTPS address above before adding a franchise.")
         if not code.strip() or not name.strip() or not location.strip():
             raise ValueError("Code, name, and location are required.")
-        code = normalize_franchise_code(code)
-        create_franchise_node(
+        if any(len(value.strip()) > 180 for value in (name, location, tally_godown_name)):
+            raise ValueError(
+                "Franchise name, location and Tally godown must be 180 characters or fewer."
+            )
+        code = validate_franchise_code(code)
+        node = create_franchise_node(
             db,
             code=code,
             name=name,
@@ -334,6 +377,7 @@ def create_franchise(
             tally_godown_name=tally_godown_name or None,
             commit=False,
         )
+        provisioned = provision_node_credential(db, node, commit=False)
         db.commit()
     except (ValueError, IntegrityError) as exc:
         db.rollback()
@@ -342,12 +386,19 @@ def create_franchise(
             if isinstance(exc, IntegrityError)
             else str(exc)
         )
-        return _render_franchises_with_result(request, db, user, error=message)
+        return _render_franchises_with_result(
+            request,
+            db,
+            user,
+            error=message,
+            form_values=form_values,
+        )
     return _render_franchises_with_result(
         request,
         db,
         user,
-        api_key=None,
+        api_key=provisioned.api_key,
+        connection_node=node,
     )
 
 
@@ -355,6 +406,7 @@ def create_franchise(
 def rotate_franchise_credential(
     request: Request,
     public_id: str,
+    confirm_replace: str = Form(""),
     db: Session = Depends(get_db),
 ):
     user = require_user(request, db, roles=ADMIN_ROLES)
@@ -362,6 +414,14 @@ def rotate_franchise_credential(
     if node is None:
         raise HTTPException(status_code=404, detail="Franchise not found")
     try:
+        if not get_setting(db, MASTER_URL_SETTING):
+            raise ValueError(
+                "Save the Master HTTPS address above before creating connection details."
+            )
+        if any(key.revoked_at is None for key in node.credentials) and confirm_replace != "true":
+            raise ValueError(
+                "Confirm replacement first. This franchise's Lite connection will need the new details."
+            )
         provisioned = rotate_node_credential(db, node)
     except ValueError as exc:
         db.rollback()
@@ -371,6 +431,7 @@ def rotate_franchise_credential(
         db,
         user,
         api_key=provisioned.api_key,
+        connection_node=node,
     )
 
 
@@ -379,13 +440,25 @@ def set_franchise_status(
     request: Request,
     public_id: str,
     active: str = Form(...),
+    confirm_deactivate: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    require_user(request, db, roles=ADMIN_ROLES)
+    user = require_user(request, db, roles=ADMIN_ROLES)
     node = db.scalar(select(FranchiseNode).where(FranchiseNode.public_id == public_id))
     if node is None:
         raise HTTPException(status_code=404, detail="Franchise not found")
-    node.active = active.strip().lower() == "true"
+    if active not in {"true", "false"}:
+        return _render_franchises_with_result(
+            request, db, user, error="Choose enable or disable access."
+        )
+    if active == "false" and confirm_deactivate != "true":
+        return _render_franchises_with_result(
+            request,
+            db,
+            user,
+            error="Confirm that you want to disable this franchise's access and invalidate its connection details.",
+        )
+    node.active = active == "true"
     if not node.active:
         now = utc_now()
         for credential in db.scalars(
@@ -396,7 +469,16 @@ def set_franchise_status(
         ).all():
             credential.revoked_at = now
     db.commit()
-    return RedirectResponse("/franchises", status_code=303)
+    return _render_franchises_with_result(
+        request,
+        db,
+        user,
+        message=(
+            f"Access enabled for {node.code}. Create replacement connection details and paste them into Lite."
+            if node.active
+            else f"Access disabled for {node.code}. Its old connection details no longer work."
+        ),
+    )
 
 
 @router.get("/network/events")
@@ -885,3 +967,35 @@ def retry_network_tally_batch(
     }:
         sync_batch(db, batch)
     return RedirectResponse(f"/network/tally/{batch.id}", status_code=303)
+
+
+@router.post("/network/tally/{batch_id}/reconcile")
+def reconcile_network_tally_batch(
+    request: Request,
+    batch_id: int,
+    resolution: str = Form(...),
+    tally_reference: str = Form(""),
+    confirmed_absent: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    event = db.scalar(select(InboundEvent).where(InboundEvent.tally_batch_id == batch_id))
+    if event is None or event.tally_batch is None:
+        raise HTTPException(status_code=404, detail="Tally queue item not found")
+    if resolution not in {"imported", "absent"} or (
+        resolution == "absent" and not confirmed_absent
+    ):
+        raise HTTPException(
+            status_code=422, detail="Confirm the voucher's presence or absence in Tally."
+        )
+    try:
+        reconcile_batch(
+            db,
+            event.tally_batch,
+            imported=resolution == "imported",
+            reference=tally_reference,
+            actor=user.username,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(f"/network/tally/{batch_id}", status_code=303)

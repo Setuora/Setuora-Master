@@ -16,7 +16,7 @@ from app.models import (
 )
 from app.services import sync_worker
 from app.services import tally as tally_service
-from app.services.tally import TallyResult, TallySyncError, sync_batch
+from app.services.tally import TallyResult, TallySyncError, reconcile_batch, sync_batch
 from tests.factories import (
     add_serial_to_batch,
     apply_batch_statuses,
@@ -159,7 +159,7 @@ def test_retryable_tally_failure_pauses_after_three_automatic_retries(db_session
     assert batch.last_error == "Tally unavailable"
 
 
-def test_crash_after_tally_success_reuses_frozen_payload_and_remote_id(db_session, monkeypatch):
+def test_crash_after_tally_success_requires_review_without_reposting(db_session, monkeypatch):
     user = User(username="sales3", password_hash="x", role="sales")
     product = Product(
         product_code="SG032",
@@ -224,6 +224,14 @@ def test_crash_after_tally_success_reuses_frozen_payload_and_remote_id(db_sessio
     db_session.commit()
     sync_batch(db_session, batch)
 
+    assert batch.status == BatchStatus.REVIEW_REQUIRED.value
+    assert posted_xml == [frozen_xml]
+    assert batch.sync_remote_id == frozen_remote_id
+    sync_batch(db_session, batch)
+    assert posted_xml == [frozen_xml]
+
+    reconcile_batch(db_session, batch, imported=True, reference="TALLY-123", actor="admin")
     assert batch.status == BatchStatus.SYNCED.value
-    assert posted_xml == [frozen_xml, frozen_xml]
+    assert batch.tally_reference == "TALLY-123"
+    assert posted_xml == [frozen_xml]
     assert batch.sync_remote_id == frozen_remote_id

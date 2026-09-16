@@ -20,8 +20,10 @@ from app.models import (
     Serial,
     StockTransfer,
     TransferStatus,
+    User,
 )
 from app.routers.master_console import _movement_rows
+from app.routers.master_console import router as master_router
 from app.routers.node_api import router as node_api_router
 from app.services.node_auth import (
     clear_node_rate_limits,
@@ -29,6 +31,7 @@ from app.services.node_auth import (
     parse_api_key,
     provision_node_credential,
 )
+from tests.factories import authenticate_client
 
 NOW = datetime(2026, 7, 29, 12, 0, tzinfo=UTC).isoformat()
 
@@ -119,6 +122,43 @@ def post(api: TestClient, api_key: str, *events: dict):
         headers=auth(api_key),
         json={"events": list(events)},
     )
+
+
+@pytest.mark.parametrize("resolution", ["imported", "absent"])
+def test_uncertain_tally_voucher_requires_admin_reconciliation(api, resolution):
+    client, db = api
+    client.app.include_router(master_router)
+    _, api_key = create_node_with_key(db, "REVIEW")
+    response = post(
+        client, api_key, event(1, "PURCHASE", [item("REVIEW-1")], party_name="Supplier")
+    )
+    assert response.status_code == 200
+    batch_id = response.json()["data"]["acknowledgements"][0]["result"]["batch_id"]
+    batch = db.get(Batch, batch_id)
+    batch.status = BatchStatus.REVIEW_REQUIRED.value
+    batch.sync_request_xml = "<frozen-request/>"
+    admin = User(username="review-admin", password_hash="x", role="admin")
+    sales = User(username="review-sales", password_hash="x", role="sales")
+    db.add_all([admin, sales])
+    db.commit()
+
+    url = f"/network/tally/{batch_id}/reconcile"
+    values = {"resolution": resolution, "tally_reference": "TALLY-123", "confirmed_absent": "true"}
+    authenticate_client(client, sales.id)
+    assert client.post(url, data=values).status_code == 403
+    authenticate_client(client, admin.id)
+    detail = client.get(f"/network/tally/{batch_id}")
+    assert detail.status_code == 200
+    assert "Verify this voucher in Tally" in detail.text
+    assert client.post(url, data={"resolution": "absent"}).status_code == 422
+    resolved = client.post(url, data=values, follow_redirects=False)
+    assert resolved.status_code == 303
+    db.refresh(batch)
+    assert batch.status == (
+        BatchStatus.SYNCED.value if resolution == "imported" else BatchStatus.PENDING_SYNC.value
+    )
+    assert batch.sync_request_xml == "<frozen-request/>"
+    assert client.post(url, data=values).status_code == 409
 
 
 def test_credentials_store_only_a_hash_and_authenticate(api):

@@ -100,7 +100,12 @@ def _json_hash(payload_json: str) -> str:
 
 
 def _event_payload(event: NetworkEventV1) -> tuple[str, str]:
-    payload_json = _canonical_json(event.model_dump(mode="json"))
+    payload = event.model_dump(mode="json")
+    # Preserve hashes of events accepted before this optional field existed.
+    for source, item in zip(event.items, payload["items"], strict=True):
+        if "sales_discount_rate" not in source.model_fields_set:
+            item.pop("sales_discount_rate", None)
+    payload_json = _canonical_json(payload)
     return payload_json, _json_hash(payload_json)
 
 
@@ -221,6 +226,7 @@ def _ensure_product(db: Session, node: FranchiseNode, item: NetworkEventItem) ->
             gst_rate=item.gst_rate,
             unit=item.unit,
             default_rate=item.rate,
+            sales_discount_rate=item.sales_discount_rate,
             tally_stock_item_name=item.tally_stock_item_name,
             purchase_qr_print_allowed=False,
             active=True,
@@ -715,6 +721,7 @@ def _inventory_event(
         tally_reference=event.reference,
         notes=f"Mirrored from franchise {node.code}; inbound event {_event_id(event)}",
         sync_remote_id=_event_id(event),
+        tally_stock_location=node.tally_godown_name,
         submitted_at=event.occurred_at,
     )
     db.add(batch)
@@ -755,6 +762,14 @@ def _inventory_event(
             )
             db.add(stock)
 
+        # Financial vouchers use the authoritative product record. Reject a
+        # changed client identity instead of posting stale GST or item mapping.
+        _validate_snapshot_product_identity(
+            db,
+            serial=serial,
+            origin=_snapshot_origin(db, stock),
+            item=item,
+        )
         previous_status = stock.status
         target_status, transaction_type = _transition_for_event(event, previous_status)
         if serial.status != previous_status:
@@ -772,6 +787,7 @@ def _inventory_event(
                 serial_id=serial.id,
                 quantity=1,
                 rate=item.rate,
+                sales_discount_rate=item.sales_discount_rate,
             )
         )
         db.add(

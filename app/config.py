@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from functools import lru_cache
 from pathlib import Path
@@ -36,7 +37,10 @@ def _load_env_file(path: Path) -> None:
             continue
 
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            # Decode only the escapes emitted by the Windows environment writer.
+            value = re.sub(r'\\(["\\])', r"\1", value[1:-1])
+        elif len(value) >= 2 and value[0] == value[-1] == "'":
             value = value[1:-1]
 
         os.environ.setdefault(key, value)

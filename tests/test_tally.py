@@ -1,4 +1,5 @@
 from decimal import Decimal
+from urllib.error import URLError
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -59,6 +60,48 @@ def test_post_to_tally_accepts_created_voucher(monkeypatch):
     monkeypatch.setattr(tally_service, "urlopen", lambda *a, **k: _FakeResponse(body))
     result = post_to_tally("<xml/>", {"tally_host": "localhost", "tally_port": "9000"})
     assert result.reference == "CREATED=1; ALTERED=0"
+
+
+@pytest.mark.parametrize("error", [TimeoutError("timed out"), URLError(TimeoutError("timed out"))])
+def test_post_to_tally_does_not_retry_an_unknown_import_outcome(monkeypatch, error):
+    def disconnected(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(tally_service, "urlopen", disconnected)
+    with pytest.raises(TallySyncError) as caught:
+        post_to_tally("<xml/>", {"tally_host": "localhost", "tally_port": "9000"})
+    assert caught.value.retryable is False
+    assert caught.value.outcome_unknown is True
+
+
+def test_post_to_tally_retries_a_refused_connection(monkeypatch):
+    def disconnected(*args, **kwargs):
+        raise URLError(ConnectionRefusedError("connection refused"))
+
+    monkeypatch.setattr(tally_service, "urlopen", disconnected)
+    with pytest.raises(TallySyncError) as caught:
+        post_to_tally("<xml/>", {"tally_host": "localhost", "tally_port": "9000"})
+    assert caught.value.retryable is True
+    assert caught.value.outcome_unknown is False
+
+
+@pytest.mark.parametrize(
+    "details",
+    [
+        "<CREATED>1</CREATED><LINEERROR>Unexpected problem</LINEERROR>",
+        "<CREATED>1</CREATED><ERRORS>1</ERRORS>",
+        "<CREATED>1</CREATED><EXCEPTIONS>1</EXCEPTIONS>",
+        "<STATUS>1</STATUS>",
+    ],
+)
+def test_post_to_tally_requires_review_for_inconclusive_response(monkeypatch, details):
+    monkeypatch.setattr(
+        tally_service, "urlopen", lambda *a, **k: _FakeResponse(f"<RESPONSE>{details}</RESPONSE>")
+    )
+    with pytest.raises(TallySyncError) as caught:
+        post_to_tally("<xml/>", {"tally_host": "localhost", "tally_port": "9000"})
+    assert caught.value.retryable is False
+    assert caught.value.outcome_unknown is True
 
 
 def test_post_to_tally_rejects_xml_entities(monkeypatch):

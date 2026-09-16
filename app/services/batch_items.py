@@ -20,16 +20,22 @@ def update_transaction_references(
 def grouped_batch_items(
     batch: Batch,
 ) -> list[dict[str, object]]:
-    grouped: dict[tuple[int, float], dict[str, object]] = {}
+    grouped: dict[tuple[int, float, float], dict[str, object]] = {}
     for item in batch.items:
         product = item.serial.product
         rate = item.rate if item.rate is not None else product.default_rate
+        discount = (
+            item.sales_discount_rate
+            if item.sales_discount_rate is not None
+            else product.sales_discount_rate
+        )
         row = grouped.setdefault(
-            (product.id, float(rate or 0)),
+            (product.id, float(rate or 0), float(discount or 0)),
             {
                 "product": product,
                 "quantity": 0,
                 "rate": rate,
+                "sales_discount_rate": discount,
             },
         )
         row["quantity"] = int(row["quantity"]) + item.quantity

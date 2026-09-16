@@ -1,16 +1,11 @@
-# Windows SFTP Release Checklist
+# Master release checklist
 
-- [ ] Windows updates and OpenSSH Server updates are current.
-- [ ] TCP 22 is reachable externally and restricted by firewall source ranges
-      where practical.
-- [ ] The admin console listens only on `127.0.0.1:8000`.
-- [ ] Every franchise has a distinct SFTP-only Windows account and code.
-- [ ] Chroot, inbox, outbox, ack, processed, and failed ACLs were tested.
-- [ ] A partial upload is ignored until renamed to `.xml`.
-- [ ] Duplicate XML is idempotent.
-- [ ] Invalid and oversized XML moves to `failed`.
-- [ ] A pending outbound file blocks the next inbound file.
-- [ ] A matching acknowledgement unblocks the next exchange.
-- [ ] A real Tally debtor/creditor export-import round trip passed.
-- [ ] SQLite backup verification and off-machine recovery passed.
-- [ ] Public exposure excludes port 8000, Tally 9000, database, and backups.
+- [ ] The Master application binds to loopback; the public HTTPS proxy exposes only `/api/v1` node endpoints.
+- [ ] Master admin pages, Tally gateway, database, and backups are not public.
+- [ ] Each franchise has a distinct active code and node credential.
+- [ ] Duplicate and out-of-order events are handled without duplicate network transactions.
+- [ ] A purchase, receive, sale, and sales return event reaches the central Tally queue as expected.
+- [ ] A Tally outage leaves a pending or failed batch for review; accepted Lite events are retained.
+- [ ] A Tally voucher is not reported as completed to operators solely because Master accepted its event.
+- [ ] The legacy SFTP worker is stopped and no new public SFTP rule is installed.
+- [ ] Verified SQLite backups and central Tally backup recovery have been tested.

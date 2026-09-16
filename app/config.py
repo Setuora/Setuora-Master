@@ -107,7 +107,7 @@ class Settings:
             os.getenv("NODE_API_MAX_BODY_BYTES", str(5 * 1024 * 1024))
         )
         self.franchise_offline_minutes: int = int(os.getenv("FRANCHISE_OFFLINE_MINUTES", "15"))
-        self.sftp_sync_enabled: bool = _flag("SFTP_SYNC_ENABLED", "true")
+        self.sftp_sync_enabled: bool = _flag("SFTP_SYNC_ENABLED", "false")
         self.sftp_exchange_root: str = os.getenv("SFTP_EXCHANGE_ROOT", "./data/sftp").strip()
         self.sftp_sync_interval_seconds: int = max(
             1, int(os.getenv("SFTP_SYNC_INTERVAL_SECONDS", "5"))

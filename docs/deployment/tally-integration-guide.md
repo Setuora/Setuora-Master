@@ -1,5 +1,7 @@
 # Franchise Tally XML Exchange
 
+> Historical franchise-Tally procedure. The current Master processes Lite events and sends supported vouchers to its central Tally; see [central Tally topology](../architecture/central-tally-topology.md).
+
 ## Franchise upload
 
 In Tally Prime, export accounting masters as XML. The file may contain other

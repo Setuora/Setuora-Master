@@ -5,13 +5,14 @@
   <div>
     <p class="eyebrow">Node administration</p>
     <h1>Franchises</h1>
-    <p class="muted">Each Tally franchise receives an isolated Windows SFTP folder.</p>
+    <p class="muted">Each Lite franchise connects to this Master with its own node credential.</p>
   </div>
 </section>
 
 {% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if api_key %}<div class="alert success">New node credential: <code>{{ api_key }}</code>. Copy it into this franchise's Lite Master connection now; it will not be shown again.</div>{% endif %}
 <section class="panel">
-  <div class="section-title"><h2>Enroll franchise</h2><span>Use the same permanent code when creating its Windows SFTP account.</span></div>
+  <div class="section-title"><h2>Enroll franchise</h2><span>Use this permanent code when configuring its Lite server.</span></div>
   <form method="post" action="/franchises" class="grid-form compact">
     <label>Permanent code<input name="code" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" placeholder="BLR-01" required></label>
     <label>Franchise name<input name="name" maxlength="180" required></label>
@@ -22,10 +23,10 @@
 </section>
 
 <section class="panel">
-  <div class="section-title"><h2>Enrolled franchises</h2><span>Run <code>setuora.ps1 sftp-add CODE</code> once on the Windows server for each code.</span></div>
+  <div class="section-title"><h2>Enrolled franchises</h2><span>Issue a separate node credential for each Lite.</span></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Franchise</th><th>Location</th><th>Last exchange</th><th>Sequence</th><th>Tally godown</th><th>SFTP user</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Franchise</th><th>Location</th><th>Last event</th><th>Sequence</th><th>Tally godown</th><th>Credentials</th><th>Actions</th></tr></thead>
       <tbody>
         {% for node in nodes %}
         <tr>
@@ -33,11 +34,15 @@
           <td>{{ node.location }}</td>
           <td>
             <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Recent' if online_by_id[node.id] else 'Waiting' }}</span>
-            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'No XML received' }}</small>
+            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'No event received' }}</small>
           </td>
           <td>{{ node.last_sequence }}</td>
           <td>{{ node.tally_godown_name or 'Not mapped' }}</td>
-          <td><code>{{ node.code|lower }}</code></td>
+          <td>
+            <form method="post" action="/franchises/{{ node.public_id }}/credentials">
+              <button class="button small" type="submit">Issue / rotate</button>
+            </form>
+          </td>
           <td>
             {% if node.active %}
             <form method="post" action="/franchises/{{ node.public_id }}/status">

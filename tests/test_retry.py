@@ -16,7 +16,7 @@ from app.models import (
 )
 from app.services import sync_worker
 from app.services import tally as tally_service
-from app.services.tally import TallyResult, sync_batch
+from app.services.tally import TallyResult, TallySyncError, sync_batch
 from tests.factories import (
     add_serial_to_batch,
     apply_batch_statuses,
@@ -110,6 +110,53 @@ def test_already_synced_batch_is_not_posted_again(db_session, monkeypatch):
     sync_batch(db_session, batch)
     assert calls["count"] == 0
     assert batch.status == BatchStatus.SYNCED.value
+
+
+def test_retryable_tally_failure_pauses_after_three_automatic_retries(db_session, monkeypatch):
+    user = User(username="retry-cap", password_hash="x", role="sales")
+    product = Product(
+        product_code="SG033",
+        product_name="Masala",
+        hsn="0910",
+        gst_rate=5,
+        unit="Pcs",
+        default_rate=100,
+        tally_stock_item_name="Masala",
+    )
+    db_session.add_all([user, product])
+    settings = {
+        "company_name": "Setuora Test Company",
+        "tally_enabled": "true",
+        "tally_sales_enabled": "true",
+        "tally_host": "127.0.0.1",
+        "tally_port": "9000",
+        "sales_voucher_type": "Sales",
+        "sales_ledger_name": "Sales",
+        "sales_gst_ledger_mappings": "5 | Sales | CGST | SGST | IGST",
+        "round_off_ledger_name": "Round Off",
+    }
+    db_session.add_all(Setting(key=key, value=value) for key, value in settings.items())
+    db_session.commit()
+    serial = generate_serials(db_session, product, 1, initial_status=SerialStatus.IN_STOCK)[0]
+    batch = create_batch(db_session, user, BatchType.SALE, "Customer", "")
+    add_serial_to_batch(db_session, batch, user, serial.serial_number)
+    apply_batch_statuses(db_session, batch, user)
+    db_session.commit()
+
+    attempts = []
+
+    def unavailable(xml, _settings):
+        attempts.append(xml)
+        raise TallySyncError("Tally unavailable", retryable=True, request_xml=xml)
+
+    monkeypatch.setattr(tally_service, "post_to_tally", unavailable)
+    for _ in range(4):
+        sync_batch(db_session, batch)
+
+    assert len(attempts) == 4
+    assert batch.retry_count == 3
+    assert batch.status == BatchStatus.FAILED.value
+    assert batch.last_error == "Tally unavailable"
 
 
 def test_crash_after_tally_success_reuses_frozen_payload_and_remote_id(db_session, monkeypatch):

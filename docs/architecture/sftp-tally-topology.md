@@ -1,5 +1,7 @@
 # Windows SFTP/Tally Topology
 
+> Historical franchise-Tally design. For the current one-Tally-at-Master system, see [central Tally topology](central-tally-topology.md).
+
 Setuora Master is the central database and synchronization worker running on a
 Windows server. Windows OpenSSH is the only Internet-facing component.
 

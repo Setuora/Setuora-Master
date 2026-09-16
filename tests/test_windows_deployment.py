@@ -66,7 +66,7 @@ def test_deployment_helper_quotes_password_characters(tmp_path, monkeypatch):
     assert deploy._read_env()[1]["BOOTSTRAP_ADMIN_PASSWORD"] == password
 
 
-def test_production_preflight_requires_sftp_and_loopback_console():
+def test_production_preflight_rejects_legacy_sftp_and_requires_loopback_console():
     issues = deploy._environment_issues(
         {
             "APP_SECRET_KEY": "x" * 48,
@@ -75,8 +75,7 @@ def test_production_preflight_requires_sftp_and_loopback_console():
             "SETUORA_APP_MODE": "master",
             "TRUSTED_HOSTS": "127.0.0.1,localhost",
             "SETUORA_WEB_PORT": "8000",
-            "SFTP_SYNC_ENABLED": "true",
-            "SFTP_EXCHANGE_ROOT": "C:/ProgramData/Setuora/sftp",
+            "SFTP_SYNC_ENABLED": "false",
             "AUTOMATIC_BACKUPS_ENABLED": "true",
             "BACKUP_RETENTION_COUNT": "14",
         },
@@ -91,7 +90,7 @@ def test_production_preflight_requires_sftp_and_loopback_console():
             "SESSION_COOKIE_SECURE": "true",
             "SETUORA_APP_MODE": "master",
             "TRUSTED_HOSTS": "localhost",
-            "SFTP_SYNC_ENABLED": "false",
+            "SFTP_SYNC_ENABLED": "true",
             "AUTOMATIC_BACKUPS_ENABLED": "true",
             "BACKUP_RETENTION_COUNT": "14",
         },
@@ -99,8 +98,7 @@ def test_production_preflight_requires_sftp_and_loopback_console():
     )
     assert "SESSION_COOKIE_SECURE must be false for the loopback-only HTTP console." in issues
     assert "TRUSTED_HOSTS must include localhost and 127.0.0.1." in issues
-    assert "SFTP_EXCHANGE_ROOT must be configured." in issues
-    assert "SFTP_SYNC_ENABLED must be true for the Windows server deployment." in issues
+    assert "SFTP_SYNC_ENABLED must be false for the central-Tally deployment." in issues
 
 
 def test_source_checkout_batch_controller_owns_waited_elevation():

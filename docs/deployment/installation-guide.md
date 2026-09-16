@@ -1,24 +1,10 @@
-# Windows Server Installation
+# Master Windows installation
 
-1. Install Python 3.11 or newer and select **Add Python to PATH**.
-2. Confirm that the server has a static public IP, or forward TCP 22 from the
-   router to the server.
-3. Run the Setuora Windows `.cmd` installer and approve the Administrator
-   prompt.
-4. Enter a unique first-administrator password.
-5. Open `http://127.0.0.1:8000` on the server and sign in.
-6. Enroll each franchise, then run `setuora.ps1 sftp-add CODE` in elevated
-   PowerShell to create its isolated SFTP account.
-7. Test SFTP from an external network before exchanging real Tally data.
+1. Prepare a Windows Server 2019+ or newer server that can reach the one central Tally HTTP/XML gateway. Give the server a durable database and backup location.
+2. Run the `Setuora-Master-<version>-windows.cmd` installer as Administrator. It installs the service and checks `http://127.0.0.1:8000/health`. The application stays bound to loopback.
+3. Configure Tally on Master: the company, gateway host and port, voucher and ledger mappings, and master readiness. Enable only the supported voucher types after a successful Tally Check.
+4. Install a reviewed HTTPS reverse proxy with a valid certificate. Route the authenticated `/api/v1` node endpoints to `127.0.0.1:8000`; do not publish the admin console, SQLite files, backups, or Tally port. Ensure the proxy preserves `Authorization` and request bodies. If it preserves the public `Host` header, add that DNS name to `TRUSTED_HOSTS` in Master's `.env` and restart Master.
+5. Test `/api/v1/node` using a credential from an external network, then enroll each franchise in **Franchises** and issue a separate node credential. Record the code and HTTPS origin for each Lite administrator.
+6. Initialize inventory on each Lite and verify inbound events, network stock, pending Tally batches, and Tally results on Master.
 
-Setup uses the Windows built-in OpenSSH capability and firewall rule. Setuora
-runs as `SYSTEM` through the `Setuora-Master` startup task. Runtime files are:
-
-- application: `C:\ProgramData\Setuora\Setuora-Master-windows`;
-- exchange: `C:\ProgramData\Setuora\sftp`;
-- database/backups: application `data` directory;
-- log: application `logs\setuora.log`.
-
-Keep the admin console on loopback. If remote administration is required, add
-a separately reviewed HTTPS reverse proxy with authentication and update secure
-cookie/host settings; SFTP exposure does not authorize publishing the console.
+The installer does not configure a reverse proxy or expose SFTP. If an older deployment had a public SFTP rule or a franchise-Tally exchange, retire that rule after migrating and verifying all nodes. Do not delete historical exchange files or credentials until they have been reviewed and backed up.

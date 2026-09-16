@@ -83,6 +83,10 @@ def test_master_console_separates_monitor_and_sensitive_roles():
         authenticate_client(client, 3)
         assert client.get("/network/events").status_code == 200
         assert client.get("/network/tally-parties").status_code == 200
+        franchises = client.get("/franchises")
+        assert franchises.status_code == 200
+        assert "SFTP" not in franchises.text
+        assert "node credential" in franchises.text
     finally:
         client.close()
         app.dependency_overrides.clear()

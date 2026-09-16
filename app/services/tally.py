@@ -39,6 +39,7 @@ TALLY_XML_SUPPORTED_BATCH_TYPES = {
     BatchType.SALES_RETURN.value,
 }
 SYNC_LEASE_MINUTES = 10
+MAX_AUTOMATIC_TALLY_RETRIES = 3
 REQUIRED_TALLY_SETTING_KEYS = {
     "company_name": "company name",
     "round_off_ledger_name": "round off ledger",
@@ -551,7 +552,13 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
     try:
         result = post_to_tally(xml, settings)
     except TallySyncError as exc:
-        batch.status = BatchStatus.PENDING_SYNC.value if exc.retryable else BatchStatus.FAILED.value
+        batch.status = (
+            BatchStatus.PENDING_SYNC.value
+            if exc.retryable
+            and claim_status != BatchStatus.FAILED.value
+            and batch.retry_count < MAX_AUTOMATIC_TALLY_RETRIES
+            else BatchStatus.FAILED.value
+        )
         batch.last_error = str(exc)
         batch.sync_started_at = None
         attempt.status = batch.status

@@ -21,7 +21,6 @@ ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.example"
 VENV_PATH = PROJECT_ROOT / ".venv"
 WINDOWS_SCRIPTS = PROJECT_ROOT / "scripts" / "windows"
 RUNNER_PATH = WINDOWS_SCRIPTS / "run-server.cmd"
-SFTP_SETUP_PATH = WINDOWS_SCRIPTS / "configure-sftp.ps1"
 TASK_NAME = "Setuora-Master"
 UNSAFE_PASSWORDS = {
     "",
@@ -139,10 +138,8 @@ def _environment_issues(values: dict[str, str], *, has_application_data: bool) -
     if not 1 <= web_port <= 65535:
         issues.append("SETUORA_WEB_PORT must be a number from 1 to 65535.")
 
-    if not values.get("SFTP_EXCHANGE_ROOT", "").strip():
-        issues.append("SFTP_EXCHANGE_ROOT must be configured.")
-    if values.get("SFTP_SYNC_ENABLED", "true").strip().lower() != "true":
-        issues.append("SFTP_SYNC_ENABLED must be true for the Windows server deployment.")
+    if values.get("SFTP_SYNC_ENABLED", "false").strip().lower() == "true":
+        issues.append("SFTP_SYNC_ENABLED must be false for the central-Tally deployment.")
 
     if values.get("AUTOMATIC_BACKUPS_ENABLED", "true").strip().lower() != "true":
         issues.append("AUTOMATIC_BACKUPS_ENABLED must be true for production.")
@@ -165,10 +162,6 @@ def _prompt_secret(label: str) -> str:
     if first != second:
         raise DeploymentError(f"{label} values did not match.")
     return first
-
-
-def _default_exchange_root() -> str:
-    return (PROJECT_ROOT.parent / "sftp").resolve().as_posix()
 
 
 def _prepare_environment() -> None:
@@ -196,9 +189,8 @@ def _prepare_environment() -> None:
             "SETUORA_APP_MODE": "master",
             "DATABASE_URL": "sqlite:///./data/setuora.db",
             "SESSION_COOKIE_SECURE": "false",
-            "TRUSTED_HOSTS": "127.0.0.1,localhost",
-            "SFTP_SYNC_ENABLED": "true",
-            "SFTP_EXCHANGE_ROOT": values.get("SFTP_EXCHANGE_ROOT") or _default_exchange_root(),
+            "TRUSTED_HOSTS": values.get("TRUSTED_HOSTS") or "127.0.0.1,localhost",
+            "SFTP_SYNC_ENABLED": "false",
             "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or "8000",
         }
     )
@@ -224,25 +216,6 @@ def _install_runtime() -> None:
             "--require-hashes",
             "-r",
             str(PROJECT_ROOT / "requirements-runtime.lock"),
-        ]
-    )
-
-
-def _configure_sftp() -> None:
-    _, values = _read_env()
-    _run(
-        [
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(SFTP_SETUP_PATH),
-            "-Action",
-            "Install",
-            "-ExchangeRoot",
-            values["SFTP_EXCHANGE_ROOT"],
         ]
     )
 
@@ -295,7 +268,7 @@ def preflight(_args: argparse.Namespace) -> None:
         raise DeploymentError(".env is missing. Run `setuora.ps1 setup` first.")
     _, values = _read_env()
     issues = _environment_issues(values, has_application_data=_has_application_data())
-    for required in (RUNNER_PATH, SFTP_SETUP_PATH, PROJECT_ROOT / "requirements-runtime.lock"):
+    for required in (RUNNER_PATH, PROJECT_ROOT / "requirements-runtime.lock"):
         if not required.is_file():
             issues.append(f"Required deployment file is missing: {required.name}")
     if issues:
@@ -307,14 +280,13 @@ def setup(_args: argparse.Namespace) -> None:
     _check_windows()
     _prepare_environment()
     _install_runtime()
-    _configure_sftp()
     _ensure_task()
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
     print("Setuora Master is healthy on Windows.")
     print("Admin console: http://127.0.0.1:8000")
-    print("SFTP: TCP 22 on this server's public IP")
+    print("Publish /api/v1 through a reviewed HTTPS reverse proxy for remote Lite nodes.")
 
 
 def start(_args: argparse.Namespace) -> None:
@@ -327,7 +299,7 @@ def start(_args: argparse.Namespace) -> None:
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
     _task("/End", "/TN", TASK_NAME, check=False)
-    print("Setuora Master stopped. Database and SFTP files were preserved.")
+    print("Setuora Master stopped. The database was preserved.")
 
 
 def status(_args: argparse.Namespace) -> None:

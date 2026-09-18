@@ -12,13 +12,15 @@ Setup creates a Python virtual environment, registers Setuora as a startup
 task, starts it, and verifies the local health endpoint. It does not expose a
 public service or install Docker.
 
-Configure a reviewed HTTPS reverse proxy that exposes only `/api/v1` to Lite
-servers, with working public DNS and a valid certificate. Keep the Master
-admin console and central Tally gateway private. The installer does not
-configure this public HTTPS access.
+Setup installs or finds Tailscale and configures private HTTPS access to only
+`/api/v1/`. Complete the Tailscale browser login when prompted, and sign Lite
+computers into the same tailnet. Tailscale may ask a tailnet administrator to
+enable MagicDNS and HTTPS certificates. The admin console and central Tally
+gateway remain local.
 
-Open **Franchises** (`/franchises`) in the Master web console and save the
-public Master HTTPS address once. Add each franchise with its permanent code
+Open **Franchises** (`/franchises`) in the Master web console. Setup saves its
+private Master HTTPS address when no different address is already configured.
+Add each franchise with its permanent code
 and Tally godown. Master creates its first credential automatically. Select
 **Copy connection details** and transfer the copied JSON securely to that
 Lite administrator. On Lite, paste it into **Admin → Master connection** and
@@ -33,6 +35,6 @@ Administrator access open a visible console after Windows approval.
 
 Choose **Install downloaded update** and select a newer Master `.cmd`
 installer, or run that installer directly. The updater preserves `.env`, the
-database, and backups. The HTTPS proxy is configured and backed up separately.
+database, and backups. The updater restores and verifies the private API route.
 
 See the [installation guide](docs/deployment/installation-guide.md).

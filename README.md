@@ -19,7 +19,7 @@ The former SFTP debtor/creditor worker, which assumed Tally at each franchise, i
 
 ## Network boundary
 
-The Windows application binds to `127.0.0.1:8000`. Keep the admin console and Tally port private. Expose only the authenticated `/api/v1` node endpoints to Lite servers through a reviewed HTTPS reverse proxy with a valid certificate. Each Lite makes outbound HTTPS requests; no public Lite port is required. The installer does not set up the reverse proxy.
+The Windows application binds to `127.0.0.1:8000`. Setup installs or finds Tailscale, connects this computer to the tailnet, and uses private Tailscale Serve to publish only `/api/v1/` over HTTPS. The admin console and Tally port stay local. Each Lite makes outbound HTTPS requests; no public Lite port or purchased domain is required.
 
 ## Windows installation
 
@@ -32,13 +32,13 @@ py -3.11 scripts\build_client_packages.py --version 1.0.0
 The installer places the application under `C:\ProgramData\Setuora\Setuora-Master-windows`, registers a startup task, and verifies `http://127.0.0.1:8000/health`. Then:
 
 1. Configure the central Tally company and HTTP/XML gateway in Master's settings. Confirm the exact masters through **Tally Check** before enabling supported voucher sync.
-2. Configure the HTTPS reverse proxy for `/api/v1` and test it from an external network.
-3. Open **Franchises** (`/franchises`) and save the public Master HTTPS address once. Add each franchise with its permanent code and Tally godown. Adding a franchise creates its first credential and displays its setup details; select **Copy connection details** and give them to that Lite administrator securely.
+2. Complete the Tailscale browser sign-in if prompted. Sign Lite computers into the same tailnet. Tailscale may ask a tailnet administrator to enable MagicDNS and HTTPS certificates. Setup checks the private HTTPS node endpoint and confirms the admin console is not shared. It prints the `https://<machine>.<tailnet>.ts.net` address.
+3. Open **Franchises** (`/franchises`). Setup saves the private Master address there if no different address is already configured. If an old address is present, move existing Lite connections first, then save the new address and issue replacement details. Add each franchise with its permanent code and Tally godown. Adding a franchise creates its first credential and displays its setup details; select **Copy connection details** and give them to that Lite administrator securely.
 4. On the matching Lite, open **Admin → Master connection** (`/master-connection`), paste the copied details, and select **Connect to Master**. Lite verifies the server and franchise, initializes its inventory baseline once, and starts synchronization. Monitor inbound events, pending vouchers, and failed Tally attempts on Master. Keep Tally only at Master.
 
 Double-click `setuora.bat` in either a source checkout or an installed copy to use the same controls menu. Closing the menu leaves Setuora running. Setup, start, stop, update, and configuration checks (`preflight`) request Windows Administrator approval and show an interactive console for prompts and errors. An installed copy's update action asks you to choose its downloaded Windows `.cmd` installer; a source checkout uses Git and requires a clean worktree and a fast-forward update.
 
-Saving the Master address does not provision public DNS, HTTPS, or a certificate. Complete that network setup separately before connecting Lite. The Windows controls still require acceptance testing on the actual deployment machines.
+Tailscale Serve persists across reboots. Start and update restore the Setuora API route; stop and update remove only Setuora's own route while leaving the Tailscale network service online. Setup refuses to terminate an unrelated process on port 8000 or replace an overlapping Tailscale Serve route. The Windows controls still require acceptance testing on the actual deployment machines.
 
 Back up the Master database and its configuration. The central Tally company needs its own supported backup process.
 

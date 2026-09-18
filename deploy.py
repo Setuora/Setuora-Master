@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
+import platform
 import re
 import secrets
+import shutil
 import socket
 import subprocess  # nosec B404
 import sys
@@ -25,6 +28,9 @@ VENV_PATH = PROJECT_ROOT / ".venv"
 WINDOWS_SCRIPTS = PROJECT_ROOT / "scripts" / "windows"
 RUNNER_PATH = WINDOWS_SCRIPTS / "run-server.cmd"
 TASK_NAME = "Setuora-Master"
+TAILSCALE_URL_SETTING = "SETUORA_TAILSCALE_URL"
+NODE_PATH = "/api/v1/"
+NODE_TARGET = "http://127.0.0.1:8000/api/v1/"
 UNSAFE_PASSWORDS = {
     "",
     "admin123",
@@ -42,6 +48,10 @@ PLAIN_ENV_VALUE = re.compile(r"^[A-Za-z0-9_./,:*?=@+%-]+$")
 
 class DeploymentError(RuntimeError):
     pass
+
+
+class TailscaleUnavailable(DeploymentError):
+    """Local app can run, but the private network is currently unavailable."""
 
 
 def _run(
@@ -311,6 +321,400 @@ def _wait_for_stop(timeout_seconds: int = 30) -> None:
     )
 
 
+def _port_listeners() -> list[dict[str, object]]:
+    """Read all Windows TCP listeners on our fixed port, including wildcard binds."""
+    script = (
+        "$items = @(Get-NetTCPConnection -State Listen -LocalPort 8000 "
+        "-ErrorAction SilentlyContinue | ForEach-Object { "
+        "$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.OwningProcess) "
+        "-ErrorAction Stop; [pscustomobject]@{Pid=$_.OwningProcess; "
+        "ExecutablePath=$p.ExecutablePath; CommandLine=$p.CommandLine} }); "
+        "ConvertTo-Json -InputObject $items -Compress -Depth 3"
+    )
+    result = _run(["powershell.exe", "-NoProfile", "-Command", script], capture=True)
+    try:
+        listeners = json.loads(result.stdout or "[]")
+    except ValueError as exc:
+        raise DeploymentError("Windows could not identify the process using port 8000.") from exc
+    if not isinstance(listeners, list) or any(not isinstance(item, dict) for item in listeners):
+        raise DeploymentError("Windows returned invalid process details for port 8000.")
+    return listeners
+
+
+def _is_own_listener(listener: dict[str, object]) -> bool:
+    expected = str(_venv_python().resolve()).replace("/", "\\").casefold()
+    executable = str(listener.get("ExecutablePath") or "").replace("/", "\\").casefold()
+    command = str(listener.get("CommandLine") or "").casefold()
+    return (
+        executable == expected
+        and "-m uvicorn app.main:app" in command
+        and "--host 127.0.0.1" in command
+        and "--port 8000" in command
+    )
+
+
+def _release_setuora_port() -> None:
+    listeners = _port_listeners()
+    if any(not _is_own_listener(item) for item in listeners):
+        raise DeploymentError(
+            "Port 8000 belongs to another process. Close that application or choose a "
+            "different computer; Setuora will not terminate it."
+        )
+    for pid in sorted({int(item["Pid"]) for item in listeners}):
+        print(f"Stopping orphaned Setuora Master process {pid} on port 8000.")
+        _run(["taskkill.exe", "/PID", str(pid), "/F"])
+    _wait_for_stop(timeout_seconds=10 if listeners else 1)
+
+
+def _find_tailscale_executable() -> str | None:
+    found = shutil.which("tailscale.exe")
+    if found:
+        return found
+    candidate = (
+        Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "Tailscale" / "tailscale.exe"
+    )
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
+def _tailscale_executable() -> str:
+    found = _find_tailscale_executable()
+    if found:
+        return found
+    winget = shutil.which("winget.exe")
+    if winget:
+        print("Installing Tailscale with Windows Package Manager...")
+        result = _run(
+            [
+                winget,
+                "install",
+                "--id",
+                "Tailscale.Tailscale",
+                "--exact",
+                "--source",
+                "winget",
+                "--scope",
+                "machine",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+                "--disable-interactivity",
+            ],
+            check=False,
+        )
+        if result.returncode == 3010:
+            raise DeploymentError(
+                "Tailscale installed; Windows needs a restart. Reboot and run Setup / repair again."
+            )
+        if result.returncode == 0:
+            for _ in range(20):
+                found = _find_tailscale_executable()
+                if found:
+                    return found
+                time.sleep(1)
+        print(
+            "Windows Package Manager did not finish Tailscale installation; trying the signed official MSI."
+        )
+
+    architecture = "amd64" if platform.machine().lower() in {"amd64", "x86_64"} else "x86"
+    url = f"https://pkgs.tailscale.com/stable/tailscale-setup-latest-{architecture}.msi"
+    print("Downloading the signed Tailscale installer from pkgs.tailscale.com...")
+    with tempfile.TemporaryDirectory(prefix="setuora-tailscale-") as directory:
+        installer = Path(directory) / "tailscale.msi"
+        with urllib.request.urlopen(url, timeout=60) as response, installer.open("wb") as target:  # nosec B310
+            shutil.copyfileobj(response, target)
+        signature_script = (
+            "$signature = Get-AuthenticodeSignature -LiteralPath $args[0]; "
+            "if ($signature.Status -ne 'Valid' -or "
+            "$signature.SignerCertificate.Subject -notmatch '(^|,)\\s*CN=Tailscale Inc\\.?($|,)') "
+            "{ exit 1 }"
+        )
+        signature_path = Path(directory) / "verify-signature.ps1"
+        signature_path.write_text(signature_script, encoding="utf-8")
+        signature = _run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(signature_path),
+                str(installer),
+            ],
+            check=False,
+        )
+        if signature.returncode != 0:
+            raise DeploymentError(
+                "The downloaded Tailscale MSI lacks a valid Tailscale signature; installation stopped."
+            )
+        result = _run(["msiexec.exe", "/i", str(installer), "/quiet", "/norestart"], check=False)
+        if result.returncode == 3010:
+            raise DeploymentError(
+                "Tailscale installed; Windows needs a restart. Reboot and run Setup / repair again."
+            )
+        if result.returncode != 0:
+            raise DeploymentError(f"Tailscale MSI installation failed (exit {result.returncode}).")
+    for _ in range(20):
+        found = _find_tailscale_executable()
+        if found:
+            return found
+        time.sleep(1)
+    raise DeploymentError(
+        "Tailscale was installed but its CLI was not found. Run Setup / repair again."
+    )
+
+
+def _tailscale_json(executable: str, *arguments: str) -> dict[str, object]:
+    result = _run([executable, *arguments], capture=True)
+    payload = json.loads(result.stdout or "{}") or {}
+    if not isinstance(payload, dict):
+        raise DeploymentError("Tailscale returned unexpected status data.")
+    return payload
+
+
+def _tailscale_identity(executable: str) -> str:
+    try:
+        _run(["sc.exe", "config", "Tailscale", "start=", "auto"])
+        _run(["sc.exe", "start", "Tailscale"], check=False)
+    except subprocess.CalledProcessError as exc:
+        raise TailscaleUnavailable(
+            "Tailscale's Windows service is unavailable. Run Setup / repair."
+        ) from exc
+    state = None
+    for _ in range(20):
+        try:
+            state = _tailscale_json(executable, "status", "--json")
+            break
+        except (subprocess.CalledProcessError, ValueError):
+            time.sleep(1)
+    if state is None:
+        raise TailscaleUnavailable(
+            "Tailscale service did not become ready. Restart Windows and run Setup / repair again."
+        )
+    if state.get("BackendState") != "Running":
+        print("Sign in to Tailscale in the browser when prompted. Use the same account on Lite.")
+        try:
+            _run([executable, "up", "--unattended=true", "--timeout=5m"])
+        except subprocess.CalledProcessError as exc:
+            raise TailscaleUnavailable(
+                "Tailscale sign-in is incomplete. Follow the link printed above, then run Setup / repair."
+            ) from exc
+    else:
+        # `set` changes only this preference; `up` can reject an existing device
+        # with other custom flags unless every one is repeated.
+        try:
+            _run([executable, "set", "--unattended=true"])
+        except subprocess.CalledProcessError as exc:
+            raise TailscaleUnavailable(
+                "Tailscale could not enable unattended mode. Run Setup / repair."
+            ) from exc
+    try:
+        state = _tailscale_json(executable, "status", "--json")
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        raise TailscaleUnavailable(
+            "Tailscale disconnected during setup. Retry Setup / repair."
+        ) from exc
+    name = str((state.get("Self") or {}).get("DNSName") or "").rstrip(".").lower()
+    if (
+        state.get("BackendState") != "Running"
+        or not (state.get("Self") or {}).get("Online")
+        or not name.endswith(".ts.net")
+    ):
+        raise TailscaleUnavailable(
+            "Tailscale is not connected or MagicDNS is disabled. Enable MagicDNS in "
+            "the Tailscale DNS admin page, then run Setup / repair again."
+        )
+    return name
+
+
+def _serve_handler(config: dict[str, object], host: str) -> tuple[object, bool]:
+    web = config.get("Web") or {}
+    site = web.get(f"{host}:443", {}) if isinstance(web, dict) else {}
+    handlers = site.get("Handlers", {}) if isinstance(site, dict) else {}
+    funnel = config.get("AllowFunnel") or {}
+    public = bool(funnel.get(f"{host}:443")) if isinstance(funnel, dict) else False
+    return handlers, public
+
+
+def _ensure_private_serve(executable: str, host: str) -> None:
+    try:
+        config = _tailscale_json(executable, "serve", "status", "--json")
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        raise TailscaleUnavailable(
+            "Tailscale Serve is offline. Retry when the tailnet is connected."
+        ) from exc
+    handlers, public = _serve_handler(config, host)
+    if public:
+        raise DeploymentError(
+            "Tailscale Funnel is enabled on HTTPS port 443. Disable it before sharing Setuora privately."
+        )
+    if not isinstance(handlers, dict):
+        raise DeploymentError("Tailscale Serve returned unexpected handler data.")
+    for path, handler in handlers.items():
+        if path == NODE_PATH and isinstance(handler, dict) and handler.get("Proxy") == NODE_TARGET:
+            continue
+        if path == "/" or path.startswith(NODE_PATH) or NODE_PATH.startswith(path):
+            raise DeploymentError(
+                f"Tailscale Serve already uses overlapping path {path!r} on HTTPS port 443. "
+                "Remove that mapping manually; Setuora will not overwrite it."
+            )
+    # Reapply our exact mapping in background mode so a prior foreground Serve
+    # session cannot disappear when its terminal closes.
+    serve = _run(
+        [executable, "serve", "--bg", "--https=443", f"--set-path={NODE_PATH}", NODE_TARGET],
+        check=False,
+    )
+    if serve.returncode != 0:
+        raise DeploymentError(
+            "Tailscale could not enable private HTTPS Serve. Follow the approval link printed above "
+            "to enable MagicDNS and HTTPS certificates, then run Setup / repair again."
+        )
+    configured = _tailscale_json(executable, "serve", "status", "--json")
+    actual, public = _serve_handler(configured, host)
+    node = actual.get(NODE_PATH) if isinstance(actual, dict) else None
+    if public or not isinstance(node, dict) or node.get("Proxy") != NODE_TARGET:
+        raise DeploymentError("Tailscale Serve did not retain the private Setuora API route.")
+
+
+def _disable_own_serve() -> None:
+    _, values = _read_env()
+    address = values.get(TAILSCALE_URL_SETTING, "")
+    if not address.startswith("https://"):
+        return
+    executable = _find_tailscale_executable()
+    if not executable:
+        print(
+            "Tailscale is unavailable; stopping local Master. Its API route cannot be checked until Tailscale is restored."
+        )
+        return
+    host = address.removeprefix("https://")
+    try:
+        config = _tailscale_json(executable, "serve", "status", "--json")
+    except (subprocess.CalledProcessError, ValueError, OSError):
+        print(
+            "Tailscale is offline; stopping local Master. Recheck the private API route when Tailscale reconnects."
+        )
+        return
+    handlers, _ = _serve_handler(config, host)
+    node = handlers.get(NODE_PATH) if isinstance(handlers, dict) else None
+    if isinstance(node, dict) and node.get("Proxy") == NODE_TARGET:
+        _run([executable, "serve", "--https=443", f"--set-path={NODE_PATH}", "off"])
+        config = _tailscale_json(executable, "serve", "status", "--json")
+        handlers, _ = _serve_handler(config, host)
+        if isinstance(handlers, dict) and NODE_PATH in handlers:
+            raise DeploymentError(
+                "Tailscale did not stop the Setuora API route; update was cancelled."
+            )
+
+
+def _verify_private_api(address: str) -> None:
+    if not re.fullmatch(r"https://[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.ts\.net", address):
+        raise DeploymentError("Tailscale returned an invalid private HTTPS address.")
+    checks = (("/api/v1/node", 401), ("/", 404))
+    for path, expected in checks:
+        try:
+            with urllib.request.urlopen(address + path, timeout=15) as response:  # noqa: S310  # nosec B310
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        except (OSError, urllib.error.URLError) as exc:
+            raise TailscaleUnavailable(
+                f"Cannot reach private Master HTTPS address {address}: {exc}"
+            ) from exc
+        if status != expected:
+            raise DeploymentError(
+                f"Private HTTPS check for {path} returned {status}, expected {expected}. "
+                "Check the Tailscale Serve route and access policy."
+            )
+
+
+def _save_connection_address(address: str) -> None:
+    # Fresh setup may launch deploy.py with system Python before the application
+    # environment exists. Use the installed runtime for SQLAlchemy access.
+    script = """import sys
+from app.database import SessionLocal
+from app.services.lite_connection import MASTER_URL_SETTING
+from app.services.settings import get_setting, update_settings
+address = sys.argv[1]
+with SessionLocal() as db:
+    current = get_setting(db, MASTER_URL_SETTING)
+    if not current:
+        update_settings(db, {MASTER_URL_SETTING: address})
+    elif current != address:
+        print(f"Franchises still uses {current}. Existing Lite connections may depend on it. "
+              f"After moving them to Tailscale, save {address} in Franchises and issue replacement details.")
+"""
+    _run([str(_venv_python()), "-c", script, address])
+
+
+def _configure_private_api(*, install: bool = True) -> None:
+    executable = _tailscale_executable() if install else _find_tailscale_executable()
+    if not executable:
+        raise TailscaleUnavailable(
+            "Tailscale is missing. Run Setup / repair to restore private Lite access."
+        )
+    host = _tailscale_identity(executable)
+    address = f"https://{host}"
+    _, values = _read_env()
+    trusted = [item.strip() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()]
+    if host not in trusted:
+        trusted.append(host)
+        _write_env({"TRUSTED_HOSTS": ",".join(trusted)})
+        # The app reads trusted hosts at startup.
+        _task("/End", "/TN", TASK_NAME, check=False)
+        try:
+            _wait_for_stop(timeout_seconds=3)
+        except DeploymentError:
+            _release_setuora_port()
+        _task("/Run", "/TN", TASK_NAME)
+        _wait_for_health()
+    _ensure_private_serve(executable, host)
+    _verify_private_api(address)
+    _save_connection_address(address)
+    _write_env({TAILSCALE_URL_SETTING: address})
+    print(f"Private Master address for Lite connection details: {address}")
+
+
+def _check_private_api_status() -> str:
+    executable = _find_tailscale_executable()
+    if not executable:
+        raise DeploymentError(
+            "Master is running locally, but Tailscale is not installed. Choose Setup / repair."
+        )
+    try:
+        state = _tailscale_json(executable, "status", "--json")
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        raise TailscaleUnavailable("Master is running locally, but Tailscale is offline.") from exc
+    host = str((state.get("Self") or {}).get("DNSName") or "").rstrip(".").lower()
+    if (
+        state.get("BackendState") != "Running"
+        or not (state.get("Self") or {}).get("Online")
+        or not host.endswith(".ts.net")
+    ):
+        raise DeploymentError(
+            "Master is running locally, but Tailscale is disconnected. Choose Setup / repair."
+        )
+    try:
+        config = _tailscale_json(executable, "serve", "status", "--json")
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        raise TailscaleUnavailable(
+            "Master is running locally, but Tailscale Serve is offline."
+        ) from exc
+    handlers, public = _serve_handler(config, host)
+    if public or not isinstance(handlers, dict):
+        raise DeploymentError(
+            "Master is running locally, but the private Tailscale Serve route is unavailable."
+        )
+    node = handlers.get(NODE_PATH)
+    if not isinstance(node, dict) or node.get("Proxy") != NODE_TARGET:
+        raise DeploymentError(
+            "Master is running locally, but the private Tailscale Serve route is unavailable."
+        )
+    address = f"https://{host}"
+    _verify_private_api(address)
+    return address
+
+
 def _has_application_data() -> bool:
     _, values = _read_env()
     url = values.get("DATABASE_URL") or "sqlite:///./data/setuora.db"
@@ -340,16 +744,30 @@ def setup(_args: argparse.Namespace) -> None:
     _check_windows()
     _prepare_environment()
     preflight(_args)
-    if _task("/Query", "/TN", TASK_NAME, check=False, capture=True).returncode == 0:
+    existing_task = _task("/Query", "/TN", TASK_NAME, check=False, capture=True).returncode == 0
+    if existing_task:
         stop(_args)
-    _install_runtime()
-    _ensure_task()
+    else:
+        _release_setuora_port()
+    try:
+        _install_runtime()
+        _ensure_task()
+    except (DeploymentError, subprocess.CalledProcessError, OSError) as exc:
+        if existing_task:
+            print("Setup repair failed while preparing the runtime. Attempting to restart Master.")
+            try:
+                start(_args)
+            except (DeploymentError, subprocess.CalledProcessError, OSError) as restart_exc:
+                raise DeploymentError(
+                    f"Setup repair failed ({exc}); Master also could not restart ({restart_exc})."
+                ) from exc
+        raise
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
+    _configure_private_api()
     print("Setuora Master is healthy on Windows.")
     print("Admin console: http://127.0.0.1:8000")
-    print("Publish /api/v1 through a reviewed HTTPS reverse proxy for remote Lite nodes.")
 
 
 def start(_args: argparse.Namespace) -> None:
@@ -360,15 +778,28 @@ def start(_args: argparse.Namespace) -> None:
         raise DeploymentError(
             "The Setuora background task is missing. Choose Setup / repair first."
         )
+    _task("/End", "/TN", TASK_NAME, check=False)
+    try:
+        _wait_for_stop(timeout_seconds=3)
+    except DeploymentError:
+        _release_setuora_port()
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
+    try:
+        _configure_private_api(install=False)
+    except TailscaleUnavailable as exc:
+        print(f"Private Lite API is offline: {exc}")
     print("Setuora Master is running at http://127.0.0.1:8000.")
 
 
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
+    _disable_own_serve()
     _task("/End", "/TN", TASK_NAME, check=False)
-    _wait_for_stop()
+    try:
+        _wait_for_stop(timeout_seconds=3)
+    except DeploymentError:
+        _release_setuora_port()
     print("Setuora Master stopped. The database was preserved.")
 
 
@@ -390,6 +821,8 @@ def status(_args: argparse.Namespace) -> None:
         raise DeploymentError("Port 8000 is being used by a different application.")
     print("Setuora Master is running and its database is responding.")
     print("Open http://127.0.0.1:8000 in your browser.")
+    address = _check_private_api_status()
+    print(f"Private Lite API is responding at {address}/api/v1/.")
 
 
 def logs(args: argparse.Namespace) -> None:
@@ -416,10 +849,24 @@ def update(_args: argparse.Namespace) -> None:
         raise DeploymentError("Run `setuora.ps1 setup` first.")
     preflight(_args)
     stop(_args)
-    _install_runtime()
-    _ensure_task()
+    try:
+        _install_runtime()
+        _ensure_task()
+    except (DeploymentError, subprocess.CalledProcessError, OSError) as exc:
+        print(
+            "Update failed while preparing the runtime. Attempting to restart the previous installation."
+        )
+        try:
+            start(_args)
+        except (DeploymentError, subprocess.CalledProcessError, OSError) as restart_exc:
+            raise DeploymentError(
+                f"Update failed ({exc}); the previous installation also could not restart ({restart_exc})."
+            ) from exc
+        raise
     start(_args)
-    print("Setuora Master was updated and is healthy.")
+    print(
+        "Setuora Master was updated and its local server is healthy. Run Status to check the private Lite API."
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

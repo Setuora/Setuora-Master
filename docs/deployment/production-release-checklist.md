@@ -1,7 +1,7 @@
 # Master release checklist
 
-- [ ] The Master application binds to loopback; the public HTTPS proxy exposes only `/api/v1` node endpoints.
-- [ ] Master admin pages, Tally gateway, database, and backups are not public.
+- [ ] The Master application binds to loopback; private Tailscale Serve exposes only `/api/v1/` node endpoints.
+- [ ] Master admin pages, Tally gateway, database, and backups are inaccessible through the Tailscale address.
 - [ ] Each franchise has a distinct active code and node credential.
 - [ ] Duplicate and out-of-order events are handled without duplicate network transactions.
 - [ ] A purchase, receive, sale, and sales return event reaches the central Tally queue as expected.

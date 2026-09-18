@@ -5,7 +5,7 @@ import deploy
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_active_deployment_is_windows_native_and_tailscale_free():
+def test_active_deployment_is_windows_native_with_private_tailscale_serve():
     assert not (PROJECT_ROOT / "compose.yaml").exists()
     assert not (PROJECT_ROOT / "Dockerfile").exists()
     assert not (PROJECT_ROOT / "deployment" / "tailscale").exists()
@@ -14,7 +14,9 @@ def test_active_deployment_is_windows_native_and_tailscale_free():
     sftp = (PROJECT_ROOT / "scripts" / "windows" / "configure-sftp.ps1").read_text(encoding="utf-8")
     assert "schtasks.exe" in deployment
     assert "docker" not in deployment
-    assert "tailscale" not in deployment
+    assert '"serve", "--bg", "--https=443"' in deployment
+    assert 'node_path = "/api/v1/"' in deployment
+    assert '"funnel"' not in deployment
     assert "OpenSSH.Server" in sftp
     assert "ForceCommand internal-sftp" in sftp
     assert "ChrootDirectory" in sftp
@@ -234,6 +236,56 @@ def test_invalid_setup_and_update_fail_before_install_or_stop(tmp_path, monkeypa
     assert mutations == []
 
 
+def test_failed_runtime_update_attempts_to_restore_previous_master(tmp_path, monkeypatch):
+    import argparse
+
+    import pytest
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
+    deploy.ENV_PATH.write_text("configured=true\n", encoding="utf-8")
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    events = []
+    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+    monkeypatch.setattr(deploy, "start", lambda _: events.append("restart"))
+
+    def install_failure():
+        events.append("install")
+        raise OSError("network outage")
+
+    monkeypatch.setattr(deploy, "_install_runtime", install_failure)
+    monkeypatch.setattr(deploy, "_ensure_task", lambda: events.append("task"))
+    with pytest.raises(OSError, match="network outage"):
+        deploy.update(argparse.Namespace())
+    assert events == ["stop", "install", "restart"]
+
+
+def test_failed_setup_repair_attempts_to_restart_existing_master(monkeypatch):
+    import argparse
+    import subprocess
+
+    import pytest
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(
+        deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
+    )
+    events = []
+    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+    monkeypatch.setattr(deploy, "start", lambda _: events.append("restart"))
+
+    def install_failure():
+        events.append("install")
+        raise OSError("dependency download failed")
+
+    monkeypatch.setattr(deploy, "_install_runtime", install_failure)
+    with pytest.raises(OSError, match="dependency download failed"):
+        deploy.setup(argparse.Namespace())
+    assert events == ["stop", "install", "restart"]
+
+
 def test_repair_preserves_existing_database_and_host_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
@@ -311,8 +363,277 @@ def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
     monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: None)
     times = iter([0, 31])
     monkeypatch.setattr(deploy.time, "monotonic", lambda: next(times))
-    with pytest.raises(deploy.DeploymentError, match="still in use"):
+    monkeypatch.setattr(
+        deploy,
+        "_port_listeners",
+        lambda: [{"Pid": 88, "ExecutablePath": "C:\\Other\\python.exe", "CommandLine": "other"}],
+    )
+    with pytest.raises(deploy.DeploymentError, match="belongs to another process"):
         deploy.stop(argparse.Namespace())
+
+
+def test_port_recovery_only_terminates_exact_master_venv_process(tmp_path, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(deploy, "VENV_PATH", tmp_path / ".venv")
+    expected = str(deploy._venv_python().resolve())
+    owned = {
+        "Pid": 123,
+        "ExecutablePath": expected,
+        "CommandLine": f'"{expected}" -m uvicorn app.main:app --host 127.0.0.1 --port 8000',
+    }
+    assert deploy._is_own_listener(owned)
+    assert not deploy._is_own_listener({**owned, "ExecutablePath": str(tmp_path / "other.exe")})
+    assert not deploy._is_own_listener({**owned, "CommandLine": "python -m http.server 8000"})
+
+    calls = []
+    monkeypatch.setattr(deploy, "_run", lambda command, **kwargs: calls.append(command))
+    monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: calls.append("released"))
+    monkeypatch.setattr(deploy, "_port_listeners", lambda: [owned])
+    deploy._release_setuora_port()
+    assert calls == [["taskkill.exe", "/PID", "123", "/F"], "released"]
+
+    calls.clear()
+    monkeypatch.setattr(
+        deploy,
+        "_port_listeners",
+        lambda: [owned, {**owned, "Pid": 456, "ExecutablePath": "C:/Other/python.exe"}],
+    )
+    with pytest.raises(deploy.DeploymentError, match="belongs to another process"):
+        deploy._release_setuora_port()
+    assert calls == []
+
+
+def test_private_serve_refuses_funnel_and_overlapping_routes(monkeypatch):
+    import pytest
+
+    host = "master.example.ts.net"
+    calls = []
+    monkeypatch.setattr(deploy, "_run", lambda command, **kwargs: calls.append(command))
+
+    config = {"AllowFunnel": {f"{host}:443": True}}
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: config)
+    with pytest.raises(deploy.DeploymentError, match="Funnel"):
+        deploy._ensure_private_serve("tailscale.exe", host)
+    assert calls == []
+
+    config = {"Web": {f"{host}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:9000"}}}}}
+    with pytest.raises(deploy.DeploymentError, match="overlapping path"):
+        deploy._ensure_private_serve("tailscale.exe", host)
+    assert calls == []
+
+
+def test_private_serve_adds_only_node_api_and_checks_persisted_route(monkeypatch):
+    import subprocess
+
+    host = "master.example.ts.net"
+    before = {"Web": {f"{host}:443": {"Handlers": {"/other": {"Proxy": "http://127.0.0.1:9000"}}}}}
+    after = {
+        "Web": {
+            f"{host}:443": {
+                "Handlers": {
+                    "/other": {"Proxy": "http://127.0.0.1:9000"},
+                    deploy.NODE_PATH: {"Proxy": deploy.NODE_TARGET},
+                }
+            }
+        }
+    }
+    states = iter([before, after])
+    calls = []
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: next(states))
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+    deploy._ensure_private_serve("tailscale.exe", host)
+    assert calls == [
+        [
+            "tailscale.exe",
+            "serve",
+            "--bg",
+            "--https=443",
+            "--set-path=/api/v1/",
+            "http://127.0.0.1:8000/api/v1/",
+        ]
+    ]
+
+
+def test_private_api_probe_requires_auth_and_blocks_console(monkeypatch):
+    import urllib.error
+
+    import pytest
+
+    statuses = iter([401, 404])
+
+    def fetch(url, timeout):
+        raise urllib.error.HTTPError(url, next(statuses), "expected", {}, None)
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", fetch)
+    deploy._verify_private_api("https://master.example.ts.net")
+
+    statuses = iter([200])
+    with pytest.raises(deploy.DeploymentError, match="expected 401"):
+        deploy._verify_private_api("https://master.example.ts.net")
+
+
+def test_existing_tailscale_session_sets_unattended_without_redoing_up(monkeypatch):
+    states = iter(
+        [
+            {
+                "BackendState": "Running",
+                "Self": {"DNSName": "master.example.ts.net.", "Online": True},
+            },
+            {
+                "BackendState": "Running",
+                "Self": {"DNSName": "master.example.ts.net.", "Online": True},
+            },
+        ]
+    )
+    calls = []
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: next(states))
+    monkeypatch.setattr(deploy, "_run", lambda command, **kwargs: calls.append(command))
+    assert deploy._tailscale_identity("tailscale.exe") == "master.example.ts.net"
+    assert calls[-1] == ["tailscale.exe", "set", "--unattended=true"]
+
+
+def test_private_status_fails_when_route_is_missing(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(deploy, "_find_tailscale_executable", lambda: "tailscale.exe")
+    states = iter(
+        [
+            {
+                "BackendState": "Running",
+                "Self": {"DNSName": "master.example.ts.net.", "Online": True},
+            },
+            {"Web": {}},
+        ]
+    )
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: next(states))
+    with pytest.raises(deploy.DeploymentError, match="Serve route is unavailable"):
+        deploy._check_private_api_status()
+
+
+def test_stop_removes_only_its_private_serve_mapping(monkeypatch):
+    host = "master.example.ts.net"
+    before = {
+        "Web": {
+            f"{host}:443": {
+                "Handlers": {
+                    deploy.NODE_PATH: {"Proxy": deploy.NODE_TARGET},
+                    "/other": {"Proxy": "http://127.0.0.1:9000"},
+                }
+            }
+        }
+    }
+    after = {
+        "Web": {
+            f"{host}:443": {
+                "Handlers": {
+                    "/other": {"Proxy": "http://127.0.0.1:9000"},
+                }
+            }
+        }
+    }
+    states = iter([before, after])
+    calls = []
+    monkeypatch.setattr(
+        deploy, "_read_env", lambda: ([], {deploy.TAILSCALE_URL_SETTING: f"https://{host}"})
+    )
+    monkeypatch.setattr(deploy, "_find_tailscale_executable", lambda: "tailscale.exe")
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: next(states))
+    monkeypatch.setattr(deploy, "_run", lambda command, **kwargs: calls.append(command))
+    deploy._disable_own_serve()
+    assert calls == [["tailscale.exe", "serve", "--https=443", "--set-path=/api/v1/", "off"]]
+
+
+def test_offline_tailscale_does_not_block_local_stop_or_start(monkeypatch, capsys):
+    import argparse
+    import subprocess
+
+    monkeypatch.setattr(
+        deploy,
+        "_read_env",
+        lambda: ([], {deploy.TAILSCALE_URL_SETTING: "https://master.example.ts.net"}),
+    )
+    monkeypatch.setattr(deploy, "_find_tailscale_executable", lambda: "tailscale.exe")
+
+    def offline(*args):
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(deploy, "_tailscale_json", offline)
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    calls = []
+    monkeypatch.setattr(
+        deploy,
+        "_task",
+        lambda *args, **kwargs: calls.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: None)
+    monkeypatch.setattr(deploy, "_wait_for_health", lambda **kwargs: None)
+    monkeypatch.setattr(
+        deploy,
+        "_configure_private_api",
+        lambda **kwargs: (_ for _ in ()).throw(deploy.TailscaleUnavailable("offline")),
+    )
+
+    deploy.stop(argparse.Namespace())
+    deploy.start(argparse.Namespace())
+    assert ("/End", "/TN", deploy.TASK_NAME) in calls
+    assert ("/Run", "/TN", deploy.TASK_NAME) in calls
+    assert "Private Lite API is offline" in capsys.readouterr().out
+
+
+def test_tailscale_msi_fallback_checks_signature_before_install(monkeypatch):
+    import io
+    import subprocess
+
+    import pytest
+
+    installed = {"value": False}
+    calls = []
+    urls = []
+    monkeypatch.setattr(
+        deploy,
+        "_find_tailscale_executable",
+        lambda: "tailscale.exe" if installed["value"] else None,
+    )
+    monkeypatch.setattr(deploy.shutil, "which", lambda _: None)
+    monkeypatch.setattr(deploy.platform, "machine", lambda: "AMD64")
+
+    def download(url, timeout):
+        urls.append(url)
+        return io.BytesIO(b"signed MSI fixture")
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", download)
+
+    def invoke(command, **kwargs):
+        calls.append(command)
+        if command[0] == "powershell.exe":
+            return subprocess.CompletedProcess(command, 1)
+        if command[0] == "msiexec.exe":
+            installed["value"] = True
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(deploy, "_run", invoke)
+    with pytest.raises(deploy.DeploymentError, match="lacks a valid Tailscale signature"):
+        deploy._tailscale_executable()
+    assert urls == ["https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"]
+    assert not any(command[0] == "msiexec.exe" for command in calls)
+
+    calls.clear()
+
+    def verified(command, **kwargs):
+        calls.append(command)
+        if command[0] == "msiexec.exe":
+            installed["value"] = True
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(deploy, "_run", verified)
+    assert deploy._tailscale_executable() == "tailscale.exe"
+    assert [command[0] for command in calls] == ["powershell.exe", "msiexec.exe"]
 
 
 def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
@@ -331,6 +652,7 @@ def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
     monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
     monkeypatch.setattr(deploy, "_wait_for_health", lambda: events.append("healthy"))
     monkeypatch.setattr(deploy, "_write_env", lambda _: None)
+    monkeypatch.setattr(deploy, "_configure_private_api", lambda: None)
     if hasattr(deploy, "_configure_private_firewall"):
         monkeypatch.setattr(deploy, "_configure_private_firewall", lambda: None)
     deploy.setup(argparse.Namespace())
@@ -466,12 +788,17 @@ def test_status_checks_running_application_without_reading_admin_secrets(monkeyp
 
     monkeypatch.setattr(deploy, "_read_env", protected_env)
     monkeypatch.setattr(
+        deploy, "_check_private_api_status", lambda: "https://master.example.ts.net"
+    )
+    monkeypatch.setattr(
         deploy.urllib.request,
         "urlopen",
         lambda *args, **kwargs: io.BytesIO(json.dumps({"status": "ok", "role": "master"}).encode()),
     )
     deploy.status(argparse.Namespace())
-    assert "database is responding" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "database is responding" in output
+    assert "https://master.example.ts.net/api/v1/" in output
 
 
 def test_status_reports_stopped_server_instead_of_claiming_it_is_running(monkeypatch):

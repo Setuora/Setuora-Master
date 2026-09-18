@@ -40,13 +40,12 @@ each franchise is not the deployment procedure for these builds.
    The default firewall rule applies to the Private profile. A domain-managed
    warehouse needs its administrator to provide the appropriate scoped Domain
    firewall rule. Never forward Lite port 8000 or Tally port 9000 publicly.
-5. Configure an HTTPS reverse proxy and certificate for Master's `/api/v1/`
-   endpoints. The installer does not do this. Preserve Authorization, request
-   bodies, and PATCH requests; permit the application's 5 MiB request size.
-   Match the public hostname with Master's trusted hosts if the proxy forwards
-   Host. Verify node access from a Lite machine. Confirm `/`, `/maintenance`,
-   `/settings`, database files, and the Tally gateway are inaccessible through
-   the public proxy.
+5. Complete Tailscale setup on Master and Lite in the same tailnet. Setup
+   publishes only Master's `/api/v1/` endpoints through private HTTPS Serve.
+   Verify from a Lite machine that `/api/v1/node` returns 401 without a
+   credential, then connect with the issued credential. Confirm `/`,
+   `/maintenance`, `/settings`, database files, and the Tally gateway are
+   inaccessible through the private address.
 6. Enroll each Lite code and credential in Master. Configure each franchise's
    Tally godown before sending transactions. On Lite enter the exact HTTPS
    origin, initialize inventory once, and run Sync now. Confirm the baseline in

@@ -55,38 +55,38 @@
   <div class="section-title"><h2>Existing franchises</h2><span>Manage connections and access.</span></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Franchise</th><th>Location</th><th>Last connection</th><th>Sequence</th><th>Tally godown</th><th>Credentials</th><th>Actions</th></tr></thead>
+      <thead><tr><th scope="col">Franchise</th><th scope="col">Location</th><th scope="col">Last connection</th><th scope="col" class="numeric">Sequence</th><th scope="col">Tally godown</th><th scope="col">Credentials</th><th scope="col">Actions</th></tr></thead>
       <tbody>
         {% for node in nodes %}
         <tr>
-          <td><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
-          <td>{{ node.location }}</td>
+          <td class="cell-wrap"><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
+          <td class="cell-wrap">{{ node.location }}</td>
           <td>
             <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Recent' if online_by_id[node.id] else 'Waiting' }}</span>
-            <small>{{ node.last_seen_at|report_date if node.last_seen_at else 'Waiting for Lite to connect' }}</small>
+            <small class="cell-date">{{ node.last_seen_at|report_date if node.last_seen_at else 'Waiting for Lite to connect' }}</small>
           </td>
-          <td>{{ node.last_sequence }}</td>
-          <td>{{ node.tally_godown_name or 'Use Master default' }}</td>
-          <td>
+          <td class="numeric">{{ node.last_sequence }}</td>
+          <td class="cell-wrap">{{ node.tally_godown_name or 'Use Master default' }}</td>
+          <td class="cell-wrap">
             {% if node.active %}
             <details>
               <summary>Replace connection details</summary>
               <p>Use this if the details were lost or the access key needs to change.</p>
-            <form method="post" action="/franchises/{{ node.public_id }}/credentials">
+            <form method="post" action="/franchises/{{ node.public_id }}/credentials" class="stack">
               <label class="checkline"><input name="confirm_replace" type="checkbox" value="true" required> I will update this franchise's Lite with the new details. Its current access key will stop working.</label>
-              <button class="button small" type="submit" {% if not master_url %}disabled{% endif %}>Create replacement details</button>
+              <div class="table-actions"><button class="button small" type="submit" {% if not master_url %}disabled{% endif %}>Create replacement details</button></div>
             </form>
             </details>
             {% else %}<small>Enable access, then create replacement connection details.</small>{% endif %}
           </td>
-          <td>
+          <td class="cell-wrap">
             {% if node.active %}
             <details>
               <summary>Disable access</summary>
-            <form method="post" action="/franchises/{{ node.public_id }}/status">
+            <form method="post" action="/franchises/{{ node.public_id }}/status" class="stack">
               <input type="hidden" name="active" value="false">
               <label class="checkline"><input name="confirm_deactivate" type="checkbox" value="true" required> Stop this franchise connecting and invalidate its current connection details.</label>
-              <button class="button small danger" type="submit">Disable access</button>
+              <div class="table-actions"><button class="button small danger" type="submit">Disable access</button></div>
             </form>
             </details>
             {% else %}

@@ -12,17 +12,17 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Reference</th><th>Source</th><th>Destination</th><th>Dispatched</th><th>Status</th><th>Received</th></tr></thead>
+      <thead><tr><th scope="col">Reference</th><th scope="col">Source</th><th scope="col">Destination</th><th scope="col">Dispatched</th><th scope="col">Status</th><th scope="col" class="numeric">Received</th></tr></thead>
       <tbody>
         {% for transfer in transfers %}
         {% set received = transfer.items|selectattr('received_quantity', 'equalto', 1)|list|length %}
         <tr>
-          <td><a href="/network/transfers/{{ transfer.public_id }}">{{ transfer.reference }}</a><small>{{ transfer.public_id }}</small></td>
+          <td class="cell-wrap"><a href="/network/transfers/{{ transfer.public_id }}">{{ transfer.reference }}</a><small>{{ transfer.public_id }}</small></td>
           <td>{{ transfer.source_franchise.code }}</td>
           <td>{{ transfer.destination_franchise.code }}</td>
-          <td>{{ transfer.created_at|report_date }}</td>
+          <td class="cell-date">{{ transfer.created_at|report_date }}</td>
           <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></td>
-          <td>{{ received }} / {{ transfer.items|length }}</td>
+          <td class="numeric">{{ received }} / {{ transfer.items|length }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No transfers match these filters.</td></tr>

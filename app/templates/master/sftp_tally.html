@@ -20,17 +20,17 @@
   <div class="section-title"><h2>Central parties</h2><span>Newest accepted ledger data wins.</span></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Name</th><th>Type</th><th>Source</th><th>GSTIN</th><th>Contact</th><th>Balances</th><th>Updated</th></tr></thead>
+      <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Source</th><th scope="col">GSTIN</th><th scope="col">Contact</th><th scope="col" class="numeric">Balances</th><th scope="col" class="cell-date">Updated</th></tr></thead>
       <tbody>
         {% for party in parties %}
         <tr>
-          <td><strong>{{ party.name }}</strong><small>{{ party.parent }}</small></td>
+          <td class="cell-wrap"><strong>{{ party.name }}</strong><small>{{ party.parent }}</small></td>
           <td><span class="status synced">{{ party.party_type|title }}</span></td>
           <td>{{ party.source_franchise.code }}</td>
-          <td>{{ party.gstin or '—' }}</td>
-          <td>{{ party.mobile or party.phone or party.email or '—' }}</td>
-          <td><small>Opening</small>{{ party.opening_balance or '—' }}<small>Closing</small>{{ party.closing_balance or '—' }}</td>
-          <td>{{ party.updated_at|report_date }}</td>
+          <td class="cell-code">{{ party.gstin or '—' }}</td>
+          <td class="cell-wrap">{{ party.mobile or party.phone or party.email or '—' }}</td>
+          <td class="numeric"><small>Opening</small>{{ party.opening_balance or '—' }}<small>Closing</small>{{ party.closing_balance or '—' }}</td>
+          <td class="cell-date">{{ party.updated_at|report_date }}</td>
         </tr>
         {% else %}
         <tr><td colspan="7" class="empty">No debtor or creditor XML has been imported yet.</td></tr>
@@ -44,16 +44,16 @@
   <div class="section-title"><h2>Recent files</h2><span>Newest 100 import attempts.</span></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Received</th><th>Franchise</th><th>File</th><th>Status</th><th>Ledgers</th><th>Result</th></tr></thead>
+      <thead><tr><th scope="col">Received</th><th scope="col">Franchise</th><th scope="col">File</th><th scope="col">Status</th><th scope="col" class="numeric">Ledgers</th><th scope="col">Result</th></tr></thead>
       <tbody>
         {% for item in imports %}
         <tr>
-          <td>{{ item.received_at|report_date }}</td>
+          <td class="cell-date">{{ item.received_at|report_date }}</td>
           <td>{{ item.franchise.code }}</td>
-          <td>{{ item.original_filename }}</td>
+          <td class="cell-code">{{ item.original_filename }}</td>
           <td><span class="status {{ 'synced' if item.status == 'IMPORTED' else 'failed' }}">{{ item.status|title }}</span></td>
-          <td>{{ item.imported_count }}</td>
-          <td>{{ item.error or 'Accepted and consolidated' }}</td>
+          <td class="numeric">{{ item.imported_count }}</td>
+          <td class="cell-wrap">{{ item.error or 'Accepted and consolidated' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No SFTP files have been processed.</td></tr>

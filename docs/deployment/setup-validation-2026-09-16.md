@@ -37,14 +37,14 @@ pilot packages. Tally remains on Master only.
 
 ## Verification completed
 
-| Check | Result |
-| --- | --- |
-| Master full automated suite | 203 passed |
-| Lite full automated suite | 400 passed |
-| Controller runtime checks included above | 7 per edition passed |
-| Master-to-Lite setup and restart integration | Passed with real application handlers and isolated databases |
-| Chromium desktop and 390-pixel mobile setup checks | Passed |
-| Changed Python lint and whitespace checks | Passed |
+| Check                                              | Result                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| Master full automated suite                        | 203 passed                                                   |
+| Lite full automated suite                          | 400 passed                                                   |
+| Controller runtime checks included above           | 7 per edition passed                                         |
+| Master-to-Lite setup and restart integration       | Passed with real application handlers and isolated databases |
+| Chromium desktop and 390-pixel mobile setup checks | Passed                                                       |
+| Changed Python lint and whitespace checks          | Passed                                                       |
 
 The full suites ran on Linux with portable PowerShell 7.6.6 enabled:
 

@@ -42,16 +42,16 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Username</th><th>Roles</th><th>Tally access</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th scope="col">Username</th><th scope="col">Roles</th><th scope="col">Tally access</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
       <tbody>
         {% for row in users %}
         <tr>
-          <td>{{ row.username }}</td>
-          <td>{{ row.role_label }}</td>
-          <td><span class="tally-access-summary">{{ user_access[row.id].summary }}</span></td>
+          <td class="cell-wrap">{{ row.username }}</td>
+          <td class="cell-wrap">{{ row.role_label }}</td>
+          <td class="cell-wrap"><span class="tally-access-summary">{{ user_access[row.id].summary }}</span></td>
           <td><span class="status {{ 'synced' if row.active else 'failed' }}">{{ 'ACTIVE' if row.active else 'DISABLED' }}</span></td>
           <td>
-            <div class="user-actions">
+            <div class="user-actions table-actions">
             {% if not has_role(row, 'super_admin') %}
             <button
               class="button small ghost"
@@ -85,6 +85,8 @@
             </div>
           </td>
         </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No users are available.</td></tr>
         {% endfor %}
       </tbody>
     </table>

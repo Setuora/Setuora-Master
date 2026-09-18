@@ -29,16 +29,16 @@
   </div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Franchise</th><th>Location</th><th>Connection</th><th>Last sequence</th><th>Last seen</th><th>Current stock</th></tr></thead>
+      <thead><tr><th scope="col">Franchise</th><th scope="col">Location</th><th scope="col">Connection</th><th scope="col" class="numeric">Last sequence</th><th scope="col" class="cell-date">Last seen</th><th scope="col" class="numeric">Current stock</th></tr></thead>
       <tbody>
         {% for node, stock_count in stock_by_node %}
         <tr>
-          <td><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
-          <td>{{ node.location }}</td>
+          <td class="cell-wrap"><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
+          <td class="cell-wrap">{{ node.location }}</td>
           <td><span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Online' if online_by_id[node.id] else 'Offline' }}</span></td>
-          <td>{{ node.last_sequence }}</td>
-          <td>{{ node.last_seen_at|report_date if node.last_seen_at else 'Never' }}</td>
-          <td>{{ stock_count }}</td>
+          <td class="numeric">{{ node.last_sequence }}</td>
+          <td class="cell-date">{{ node.last_seen_at|report_date if node.last_seen_at else 'Never' }}</td>
+          <td class="numeric">{{ stock_count }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No franchise has been enrolled.</td></tr>
@@ -53,14 +53,14 @@
     <div class="section-title"><h2>Recent movements</h2>{% if has_role(user, 'super_admin', 'admin') %}<a href="/network/events">View all</a>{% endif %}</div>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Time</th><th>Franchise</th><th>Event</th><th>Reference</th></tr></thead>
+        <thead><tr><th scope="col" class="cell-date">Time</th><th scope="col">Franchise</th><th scope="col">Event</th><th scope="col">Reference</th></tr></thead>
         <tbody>
           {% for event in recent_events %}
           <tr>
-            <td>{{ event.occurred_at|report_date }}</td>
+            <td class="cell-date">{{ event.occurred_at|report_date }}</td>
             <td>{{ event.franchise.code }}</td>
             <td>{% if has_role(user, 'super_admin', 'admin') %}<a href="/network/events/{{ event.event_id }}">{{ event.event_type|replace('_', ' ')|title }}</a>{% else %}{{ event.event_type|replace('_', ' ')|title }}{% endif %}</td>
-            <td>{{ event.reference or '—' }}</td>
+            <td class="cell-wrap">{{ event.reference or '—' }}</td>
           </tr>
           {% else %}
           <tr><td colspan="4" class="empty">No movements received yet.</td></tr>
@@ -74,14 +74,14 @@
     <div class="section-title"><h2>Recent transfers</h2><a href="/network/transfers">View all</a></div>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Reference</th><th>Route</th><th>Status</th><th>Items</th></tr></thead>
+        <thead><tr><th scope="col">Reference</th><th scope="col">Route</th><th scope="col">Status</th><th scope="col" class="numeric">Items</th></tr></thead>
         <tbody>
           {% for transfer in recent_transfers %}
           <tr>
-            <td><a href="/network/transfers/{{ transfer.public_id }}">{{ transfer.reference }}</a></td>
+            <td class="cell-wrap"><a href="/network/transfers/{{ transfer.public_id }}">{{ transfer.reference }}</a></td>
             <td>{{ transfer.source_franchise.code }} → {{ transfer.destination_franchise.code }}</td>
             <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></td>
-            <td>{{ transfer.items|length }}</td>
+            <td class="numeric">{{ transfer.items|length }}</td>
           </tr>
           {% else %}
           <tr><td colspan="4" class="empty">No franchise transfers yet.</td></tr>

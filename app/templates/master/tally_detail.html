@@ -15,39 +15,41 @@
   <h2>Verify this voucher in Tally</h2>
   <p>The import result could not be confirmed. The central Tally queue is paused to prevent duplicate vouchers. Search Tally for voucher {{ batch.batch_number }} before choosing a result below.</p>
   {% if has_role(user, 'super_admin', 'admin') %}
-  <form method="post" action="/network/tally/{{ batch.id }}/reconcile">
+  <div class="stack">
+  <form method="post" action="/network/tally/{{ batch.id }}/reconcile" class="stack">
     <input type="hidden" name="resolution" value="imported">
     <label>Verified Tally voucher reference<input name="tally_reference" maxlength="180" required></label>
-    <button class="button primary" type="submit">Confirm voucher exists</button>
+    <div class="actions"><button class="button primary" type="submit">Confirm voucher exists</button></div>
   </form>
-  <form method="post" action="/network/tally/{{ batch.id }}/reconcile">
+  <form method="post" action="/network/tally/{{ batch.id }}/reconcile" class="stack">
     <input type="hidden" name="resolution" value="absent">
-    <label><input type="checkbox" name="confirmed_absent" value="true" required> I checked Tally and this voucher was not imported.</label>
-    <button class="button" type="submit">Queue verified missing voucher</button>
+    <label class="checkline"><input type="checkbox" name="confirmed_absent" value="true" required> I checked Tally and this voucher was not imported.</label>
+    <div class="actions"><button class="button" type="submit">Queue verified missing voucher</button></div>
   </form>
+  </div>
   {% endif %}
 </section>
 {% endif %}
 <section class="panel">
   <dl class="details">
     <dt>Status</dt><dd><span class="status {{ batch.status|lower }}">{{ batch.status|replace('_', ' ')|title }}</span></dd>
-    <dt>Source reference</dt><dd>{{ event.reference or '—' }}</dd>
-    <dt>Tally reference</dt><dd>{{ batch.tally_reference or '—' }}</dd>
+    <dt>Source reference</dt><dd class="cell-wrap">{{ event.reference or '—' }}</dd>
+    <dt>Tally reference</dt><dd class="cell-wrap">{{ batch.tally_reference or '—' }}</dd>
     <dt>Retry count</dt><dd>{{ batch.retry_count }}</dd>
-    <dt>Last error</dt><dd>{{ batch.last_error or '—' }}</dd>
+    <dt>Last error</dt><dd class="cell-wrap">{{ batch.last_error or '—' }}</dd>
   </dl>
 </section>
 <section class="panel">
   <div class="section-title"><h2>Attempt history</h2></div>
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Time</th><th>Status</th><th>Error</th><th>Request</th><th>Response</th></tr></thead>
+      <thead><tr><th scope="col" class="cell-date">Time</th><th scope="col">Status</th><th scope="col">Error</th><th scope="col">Request</th><th scope="col">Response</th></tr></thead>
       <tbody>
         {% for attempt in batch.sync_attempts|sort(attribute='created_at', reverse=true) %}
         <tr>
-          <td>{{ attempt.created_at|report_date }}</td>
+          <td class="cell-date">{{ attempt.created_at|report_date }}</td>
           <td><span class="status {{ attempt.status|lower }}">{{ attempt.status|replace('_', ' ')|title }}</span></td>
-          <td>{{ attempt.error or '—' }}</td>
+          <td class="cell-wrap">{{ attempt.error or '—' }}</td>
           <td>{{ 'Captured' if attempt.request_xml else '—' }}</td>
           <td>{{ 'Captured' if attempt.response_xml else '—' }}</td>
         </tr>

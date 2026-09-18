@@ -6,15 +6,22 @@
   <meta name="theme-color" content="#faf9f5">
   <title>{% block title %}Setuora Master{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=20260817-receipts-1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260918-editorial-1">
+  <link rel="stylesheet" href="/static/design-system.css?v=20260918-editorial-1">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   {% if user %}
   <header class="global-nav">
     <a class="brand" href="/">
       <span class="brand__mark">Setuora</span>
+      <span class="brand__edition">Master</span>
     </a>
-    <nav class="subnav" aria-label="Sections">
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="section-navigation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      Menu
+    </button>
+    <nav class="subnav" id="section-navigation" aria-label="Sections">
       <div class="subnav__inner">
         {% if has_role(user, 'super_admin', 'admin', 'directors') %}
         <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Network</a>
@@ -68,68 +75,12 @@
       </div>
     </details>
   </header>
-  <script nonce="{{ csp_nonce(request) }}">
-    const navMenus = Array.from(document.querySelectorAll("details.nav-menu"));
-    const profileMenu = document.querySelector("details.profile-menu");
-
-    function positionNavMenu(menu) {
-      if (!menu.open) return;
-      const summary = menu.querySelector("summary");
-      const panel = menu.querySelector(".nav-menu__panel");
-      const subnav = menu.closest(".subnav");
-      const container = menu.closest(".subnav__inner");
-      if (!summary || !panel) return;
-
-      const margin = 12;
-      const summaryRect = summary.getBoundingClientRect();
-      const subnavRect = subnav ? subnav.getBoundingClientRect() : summaryRect;
-      const containerRect = container ? container.getBoundingClientRect() : subnavRect;
-      const maxHeight = Math.max(140, window.innerHeight - subnavRect.bottom - margin);
-      panel.style.maxHeight = `${maxHeight}px`;
-
-      const panelWidth = panel.getBoundingClientRect().width;
-      const maxLeft = window.innerWidth - panelWidth - margin;
-      const left = Math.min(Math.max(summaryRect.left, margin), Math.max(margin, maxLeft));
-      panel.style.top = `${subnavRect.bottom - containerRect.top + 6}px`;
-      panel.style.left = `${left - containerRect.left}px`;
-    }
-
-    navMenus.forEach((menu) => {
-      menu.addEventListener("toggle", () => {
-        if (!menu.open) return;
-        if (profileMenu) profileMenu.removeAttribute("open");
-        navMenus.forEach((other) => {
-          if (other !== menu) other.removeAttribute("open");
-        });
-        requestAnimationFrame(() => positionNavMenu(menu));
-      });
-    });
-
-    if (profileMenu) {
-      profileMenu.addEventListener("toggle", () => {
-        if (profileMenu.open) navMenus.forEach((menu) => menu.removeAttribute("open"));
-      });
-    }
-
-    document.addEventListener("click", (event) => {
-      navMenus.forEach((menu) => {
-        if (!menu.contains(event.target)) menu.removeAttribute("open");
-      });
-      if (profileMenu && !profileMenu.contains(event.target)) profileMenu.removeAttribute("open");
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape") return;
-      navMenus.forEach((menu) => menu.removeAttribute("open"));
-      if (profileMenu) profileMenu.removeAttribute("open");
-    });
-    window.addEventListener("resize", () => navMenus.forEach(positionNavMenu));
-    window.addEventListener("scroll", () => navMenus.forEach(positionNavMenu), true);
-  </script>
+  <script src="/static/navigation.js?v=20260918-editorial-1"></script>
   {% endif %}
-  <main class="page">
+  <main class="page" id="main-content" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
-  <script src="/static/table-viewport.js?v=20260729-master-1"></script>
+  <script src="/static/table-viewport.js?v=20260918-editorial-1"></script>
   <script src="/static/searchable-select.js?v=20260729-master-1"></script>
 </body>
 </html>

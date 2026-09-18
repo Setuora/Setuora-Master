@@ -12,16 +12,16 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Occurred</th><th>Franchise</th><th>Source</th><th>Voucher batch</th><th>Status</th><th>Error</th></tr></thead>
+      <thead><tr><th scope="col">Occurred</th><th scope="col">Franchise</th><th scope="col">Source</th><th scope="col">Voucher batch</th><th scope="col">Status</th><th scope="col">Error</th></tr></thead>
       <tbody>
         {% for event in events %}
         <tr>
-          <td>{{ event.occurred_at|report_date }}</td>
+          <td class="cell-date">{{ event.occurred_at|report_date }}</td>
           <td>{{ event.franchise.code }}</td>
-          <td>{{ event.event_type|replace('_', ' ')|title }}<small>{{ event.reference or event.event_id }}</small></td>
+          <td class="cell-wrap">{{ event.event_type|replace('_', ' ')|title }}<small>{{ event.reference or event.event_id }}</small></td>
           <td><a href="/network/tally/{{ event.tally_batch.id }}">{{ event.tally_batch.batch_number }}</a></td>
           <td><span class="status {{ event.tally_batch.status|lower }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</span></td>
-          <td>{{ event.tally_batch.last_error or '—' }}</td>
+          <td class="cell-wrap">{{ event.tally_batch.last_error or '—' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No Tally queue items match these filters.</td></tr>

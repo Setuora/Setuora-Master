@@ -28,18 +28,18 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Label</th><th>Tally company</th><th>Status</th><th class="col-actions">Actions</th></tr></thead>
+      <thead><tr><th scope="col">Label</th><th scope="col">Tally company</th><th scope="col">Status</th><th scope="col" class="col-actions">Actions</th></tr></thead>
       <tbody>
         {% for company in companies %}
         <tr class="company-row {{ 'is-active' if company.is_active else '' }}" {% if company.is_active %}data-edit-company{% endif %}>
-          <td>{{ company.name }}</td>
-          <td>{{ company.tally_company_name }}</td>
+          <td class="cell-wrap">{{ company.name }}</td>
+          <td class="cell-wrap">{{ company.tally_company_name }}</td>
           <td>
             {% if company.is_active %}<span class="status active">Active</span>
             {% else %}<span class="status">Saved</span>{% endif %}
           </td>
           <td>
-            <div class="row-actions">
+            <div class="row-actions table-actions">
               {% if company.is_active %}
               <button class="button small" type="button" data-edit-company>Edit</button>
               {% else %}
@@ -94,8 +94,9 @@
       <label>Company name<input name="company_name" value="{{ settings.company_name }}" required></label>
       <label class="checkline">
         <input type="checkbox" name="tally_enabled" value="true" data-no-autosave {{ 'checked' if settings.tally_enabled == 'true' else '' }}>
-        Automatically sync eligible purchase and sale events received from franchises with Tally
-        <small class="muted" style="display:inline">- saved only with the button below; pending syncs retry in the background</small>
+        <span>Automatically sync eligible purchase and sale events received from franchises with Tally
+          <small class="muted">Saved only with the button below; pending syncs retry in the background</small>
+        </span>
       </label>
       <div class="two-col">
         <label>Tally host<input name="tally_host" value="{{ settings.tally_host }}" required></label>

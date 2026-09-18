@@ -27,15 +27,15 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Occurred</th><th>Franchise / sequence</th><th>Movement</th><th>Reference</th><th>Actor</th><th>Tally</th></tr></thead>
+      <thead><tr><th scope="col">Occurred</th><th scope="col">Franchise / sequence</th><th scope="col">Movement</th><th scope="col">Reference</th><th scope="col">Actor</th><th scope="col">Tally</th></tr></thead>
       <tbody>
         {% for event in events %}
         <tr>
-          <td>{{ event.occurred_at|report_date }}</td>
+          <td class="cell-date">{{ event.occurred_at|report_date }}</td>
           <td><strong>{{ event.franchise.code }}</strong><small>#{{ event.sequence }}</small></td>
           <td><a href="/network/events/{{ event.event_id }}">{{ event.event_type|replace('_', ' ')|title }}</a></td>
-          <td>{{ event.reference or '—' }}</td>
-          <td>{{ event.actor or 'System' }}</td>
+          <td class="cell-wrap">{{ event.reference or '—' }}</td>
+          <td class="cell-wrap">{{ event.actor or 'System' }}</td>
           <td>{% if event.tally_batch %}<span class="status {{ event.tally_batch.status|lower }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</span>{% else %}Not applicable{% endif %}</td>
         </tr>
         {% else %}

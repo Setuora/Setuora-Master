@@ -16,16 +16,16 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Date</th><th>Franchise</th><th>Proof</th><th>UTR number</th><th>Submitted by</th><th>Status / review</th></tr></thead>
+      <thead><tr><th scope="col" class="cell-date">Date</th><th scope="col">Franchise</th><th scope="col">Proof</th><th scope="col">UTR number</th><th scope="col">Submitted by</th><th scope="col">Status / review</th></tr></thead>
       <tbody>
         {% for receipt in receipts %}
         <tr>
-          <td>{{ receipt.receipt_date|report_date }}</td>
-          <td>{{ receipt.franchise.code }}<small>{{ receipt.franchise.name }}</small></td>
+          <td class="cell-date">{{ receipt.receipt_date|report_date }}</td>
+          <td class="cell-wrap">{{ receipt.franchise.code }}<small>{{ receipt.franchise.name }}</small></td>
           <td><a class="button small" href="/receipts/{{ receipt.public_id }}/proof" target="_blank" rel="noopener">View image</a></td>
-          <td>{{ receipt.utr_number or '-' }}</td>
-          <td>{{ receipt.submitted_by or '-' }}<small>{{ receipt.created_at|report_date }}</small></td>
-          <td>
+          <td class="cell-code">{{ receipt.utr_number or '-' }}</td>
+          <td class="cell-wrap">{{ receipt.submitted_by or '-' }}<small>{{ receipt.created_at|report_date }}</small></td>
+          <td class="cell-wrap">
             <span class="status {{ receipt.status|lower }}">{{ receipt.status|title }}</span>
             {% if receipt.status == 'PENDING' and has_role(user, 'super_admin', 'admin') %}
             <div class="receipt-review-actions">

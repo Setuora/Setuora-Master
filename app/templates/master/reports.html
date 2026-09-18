@@ -26,13 +26,13 @@
 <section class="panel">
   <div class="table-scroll">
     <table>
-      <thead><tr><th>Franchise</th><th>Product</th><th>Current stock</th><th>Purchased</th><th>Sold</th><th>Sales return</th><th>Purchase return</th><th>Issued</th><th>Transfer out</th><th>Transfer in</th></tr></thead>
+      <thead><tr><th scope="col">Franchise</th><th scope="col">Product</th><th scope="col" class="numeric">Current stock</th><th scope="col" class="numeric">Purchased</th><th scope="col" class="numeric">Sold</th><th scope="col" class="numeric">Sales return</th><th scope="col" class="numeric">Purchase return</th><th scope="col" class="numeric">Issued</th><th scope="col" class="numeric">Transfer out</th><th scope="col" class="numeric">Transfer in</th></tr></thead>
       <tbody>
         {% for row in rows %}
         <tr>
-          <td><strong>{{ row.franchise.code }}</strong><small>{{ row.franchise.name }}</small></td>
-          <td><strong>{{ row.product_name }}</strong><small>{{ row.product_code }}</small></td>
-          <td>{{ row.current_stock }}</td><td>{{ row.purchased }}</td><td>{{ row.sold }}</td><td>{{ row.sales_returns }}</td><td>{{ row.purchase_returns }}</td><td>{{ row.issued }}</td><td>{{ row.transferred_out }}</td><td>{{ row.transferred_in }}</td>
+          <td class="cell-wrap"><strong>{{ row.franchise.code }}</strong><small>{{ row.franchise.name }}</small></td>
+          <td class="cell-wrap"><strong>{{ row.product_name }}</strong><small>{{ row.product_code }}</small></td>
+          <td class="numeric">{{ row.current_stock }}</td><td class="numeric">{{ row.purchased }}</td><td class="numeric">{{ row.sold }}</td><td class="numeric">{{ row.sales_returns }}</td><td class="numeric">{{ row.purchase_returns }}</td><td class="numeric">{{ row.issued }}</td><td class="numeric">{{ row.transferred_out }}</td><td class="numeric">{{ row.transferred_in }}</td>
         </tr>
         {% else %}
         <tr><td colspan="10" class="empty">No centralized inventory data matches these filters.</td></tr>

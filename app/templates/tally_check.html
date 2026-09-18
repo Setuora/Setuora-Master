@@ -155,7 +155,7 @@
           </div>
           <div class="table-scroll tally-live-table-scroll">
             <table>
-              <thead><tr><th>Ledger</th><th>Group</th><th>Closing balance</th></tr></thead>
+              <thead><tr><th scope="col">Ledger</th><th scope="col">Group</th><th scope="col" class="numeric">Closing balance</th></tr></thead>
               <tbody data-tally-live-ledgers>
                 <tr><td colspan="3" class="empty">Load a Tally company to see ledgers.</td></tr>
               </tbody>
@@ -170,7 +170,7 @@
           </div>
           <div class="table-scroll tally-live-table-scroll">
             <table>
-              <thead><tr><th>Date</th><th>Voucher</th><th>Party ledger</th><th>Tally user</th><th>Amount</th></tr></thead>
+              <thead><tr><th scope="col" class="cell-date">Date</th><th scope="col">Voucher</th><th scope="col">Party ledger</th><th scope="col">Tally user</th><th scope="col" class="numeric">Amount</th></tr></thead>
               <tbody data-tally-live-sales>
                 <tr><td colspan="5" class="empty">Load a Tally company to see sales vouchers.</td></tr>
               </tbody>
@@ -215,10 +215,10 @@
         <table class="company-master-table">
           <thead>
             <tr>
-              <th>Type</th>
-              <th>Tally master</th>
-              <th>Status</th>
-              <th>Check</th>
+              <th scope="col">Type</th>
+              <th scope="col">Tally master</th>
+              <th scope="col">Status</th>
+              <th scope="col">Check</th>
             </tr>
           </thead>
           <tbody>
@@ -226,7 +226,7 @@
             {% set confirmation = confirmations.get(item.key) %}
             <tr data-tally-master-search-row data-tally-master-search="{{ item.master_type }} {{ item.master_name }} {{ item.source }} {{ item.detail }}">
               <td>{{ item.master_type }}</td>
-              <td>
+              <td class="cell-wrap">
                 {% if item.master_name %}
                 <strong>{{ item.master_name }}</strong>
                 <small>{{ item.detail }}</small>
@@ -508,7 +508,7 @@
         );
         if (!preserveExisting) {
           tableMessage(ledgerBody, 3, "Loading ledgers...");
-          tableMessage(salesBody, 4, "Loading sales book...");
+          tableMessage(salesBody, 5, "Loading sales book...");
         }
         try {
           const ledgerUrl = "/tally-check/companies/" + companyId + "/live/ledgers?" + query({ tally_company: company });
@@ -524,7 +524,7 @@
         } catch (error) {
           if (!preserveExisting) {
             tableMessage(ledgerBody, 3, "Could not load ledgers.");
-            tableMessage(salesBody, 4, "Could not load the sales book.");
+            tableMessage(salesBody, 5, "Could not load the sales book.");
           }
           setStatus(
             (preserveExisting ? "Showing saved data. Automatic refresh failed: " : "") +

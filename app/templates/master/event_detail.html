@@ -7,12 +7,12 @@
 </section>
 <section class="panel">
   <dl class="details">
-    <dt>Event ID</dt><dd>{{ event.event_id }}</dd>
-    <dt>Reference</dt><dd>{{ event.reference or '—' }}</dd>
+    <dt>Event ID</dt><dd class="cell-code">{{ event.event_id }}</dd>
+    <dt>Reference</dt><dd class="cell-wrap">{{ event.reference or '—' }}</dd>
     <dt>Occurred</dt><dd>{{ event.occurred_at|report_date }}</dd>
     <dt>Received</dt><dd>{{ event.received_at|report_date }}</dd>
     <dt>Actor</dt><dd>{{ event.actor or 'System' }}</dd>
-    <dt>Payload hash</dt><dd><code>{{ event.payload_hash }}</code></dd>
+    <dt>Payload hash</dt><dd class="cell-code"><code>{{ event.payload_hash }}</code></dd>
     <dt>Tally queue</dt><dd>{% if event.tally_batch %}<a href="/network/tally/{{ event.tally_batch.id }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</a>{% else %}Not applicable{% endif %}</dd>
   </dl>
 </section>

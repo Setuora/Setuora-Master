@@ -10,7 +10,6 @@ import platform
 import re
 import secrets
 import shutil
-import socket
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -304,16 +303,12 @@ def _wait_for_health(timeout_seconds: int = 120) -> None:
 
 
 def _wait_for_stop(timeout_seconds: int = 30) -> None:
-    # Do not replace runtime files while the scheduled process still owns the port.
+    # Windows can time out a loopback connection even when no process is listening.
+    # Inspect actual listeners before replacing runtime files.
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", 8000), timeout=1):
-                pass
-        except ConnectionRefusedError:
+        if not _port_listeners():
             return
-        except OSError:
-            pass
         time.sleep(0.5)
     raise DeploymentError(
         "Port 8000 is still in use after stopping the task. "

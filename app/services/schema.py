@@ -254,6 +254,70 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
         _backup_before_schema_rebuild(target)
         _rebuild_sqlite_inventory_tables(target)
 
+    if target.dialect.name == "sqlite" and _network_stock_needs_nullable_event(target):
+        _backup_before_schema_rebuild(target)
+        _allow_master_allocated_network_stock(target)
+
+
+def _network_stock_needs_nullable_event(target: Engine) -> bool:
+    inspector = inspect(target)
+    if "network_stock" not in inspector.get_table_names():
+        return False
+    return any(
+        column["name"] == "last_event_id" and not column["nullable"]
+        for column in inspector.get_columns("network_stock")
+    )
+
+
+def _allow_master_allocated_network_stock(target: Engine) -> None:
+    """Existing SQLite installs need a rebuild to make inbound provenance optional."""
+
+    with target.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE network_stock__setuora_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    serial_id INTEGER NOT NULL REFERENCES serials(id) ON DELETE CASCADE,
+                    current_franchise_id INTEGER NOT NULL REFERENCES franchise_nodes(id),
+                    origin_franchise_id INTEGER NOT NULL REFERENCES franchise_nodes(id),
+                    status VARCHAR(40) NOT NULL,
+                    last_event_id INTEGER REFERENCES inbound_events(id),
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO network_stock__setuora_new
+                    (id, serial_id, current_franchise_id, origin_franchise_id,
+                     status, last_event_id, updated_at)
+                SELECT id, serial_id, current_franchise_id, origin_franchise_id,
+                       status, last_event_id, updated_at
+                FROM network_stock
+                """
+            )
+        )
+        connection.execute(text("DROP TABLE network_stock"))
+        connection.execute(text("ALTER TABLE network_stock__setuora_new RENAME TO network_stock"))
+        for column in (
+            "serial_id",
+            "current_franchise_id",
+            "origin_franchise_id",
+            "status",
+            "last_event_id",
+            "updated_at",
+        ):
+            uniqueness = "UNIQUE " if column == "serial_id" else ""
+            connection.execute(
+                text(
+                    f"CREATE {uniqueness}INDEX ix_network_stock_{column} "
+                    f"ON network_stock ({column})"
+                )
+            )
+
 
 def _missing_inventory_foreign_keys(target: Engine) -> bool:
     inspector = inspect(target)

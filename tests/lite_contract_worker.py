@@ -10,6 +10,7 @@ from urllib.error import URLError
 sys.path.insert(0, str(Path.cwd()))
 
 from app.services.inventory import add_serial_to_batch, apply_batch_statuses, create_batch
+from app.services.shelf_verification import verify_pending_items_on_shelf
 from sqlalchemy import select
 
 from app.database import Base, SessionLocal, engine
@@ -21,6 +22,7 @@ from app.models import (
     Product,
     Serial,
     SerialStatus,
+    StorageLocation,
     User,
 )
 from app.services import master_sync, transfer
@@ -97,6 +99,27 @@ def main():
                 incoming = db.scalar(select(LocalTransfer))
                 transfer.scan_inbound_transfer_item(db, incoming, instruction["receive"])
                 transfer.finalize_inbound_receipt(db, incoming, user)
+        elif action == "purchase_allocated":
+            batch = create_batch(db, user, BatchType.PURCHASE, "Contract supplier", "Master QR")
+            add_serial_to_batch(db, batch, user, instruction["serial_number"])
+            location = db.scalar(select(StorageLocation).where(StorageLocation.code == "QR-CONTRACT-SHELF"))
+            if location is None:
+                location = StorageLocation(
+                    code="QR-CONTRACT-SHELF",
+                    warehouse="MAIN",
+                    zone="QR",
+                    section="1",
+                    rack="R1",
+                    shelf="S1",
+                    bin="B1",
+                )
+                db.add(location)
+                db.flush()
+            verify_pending_items_on_shelf(db, batch=batch, location=location, user=user)
+            apply_batch_statuses(db, batch, user)
+            batch.status = BatchStatus.PENDING_SYNC.value
+            master_sync.enqueue_batch_submitted_event(db, batch, user=user)
+            db.commit()
         elif action != "inspect":
             raise ValueError(action)
         result = {

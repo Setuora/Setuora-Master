@@ -52,7 +52,7 @@
 </section>
 
 <section class="panel">
-  <div class="section-title"><h2>Existing franchises</h2><span>Manage connections and access.</span></div>
+  <div class="section-title"><h2>Existing franchises</h2><span>Manage connections, QR codes, and access. <a href="/network/qr-replacements">Replace a QR code</a></span></div>
   <div class="table-scroll">
     <table>
       <thead><tr><th scope="col">Franchise</th><th scope="col">Location</th><th scope="col">Last connection</th><th scope="col" class="numeric">Sequence</th><th scope="col">Tally godown</th><th scope="col">Credentials</th><th scope="col">Actions</th></tr></thead>
@@ -69,6 +69,7 @@
           <td class="cell-wrap">{{ node.tally_godown_name or 'Use Master default' }}</td>
           <td class="cell-wrap">
             {% if node.active %}
+            <a class="button small" href="/franchises/{{ node.public_id }}/qr">Create QR codes</a>
             <details>
               <summary>Replace connection details</summary>
               <p>Use this if the details were lost or the access key needs to change.</p>

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}QR codes for {{ node.code }} - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Setuora Master · {{ node.code }}</p>
+    <h1>Create franchise QR codes</h1>
+    <p class="muted">Master allocates each QR serial and sends it to this franchise's Lite during its next sync. Print labels after creating them.</p>
+  </div>
+  <a class="button" href="/franchises">Back to franchises</a>
+</section>
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+<section class="panel">
+  <div class="section-title"><h2>New allocation</h2><span>Up to 5,000 QR codes per request.</span></div>
+  {% if not node.active %}<p class="alert error">Enable this franchise before allocating QR codes.</p>{% endif %}
+  <form method="post" action="/franchises/{{ node.public_id }}/qr" class="grid-form">
+    <input type="hidden" name="request_id" value="{{ request_id }}">
+    <label>Product code<input name="product_code" value="{{ values.get('product_code', '') }}" maxlength="80" required><small>Enter the code used in this franchise's Lite. Existing product details are reused.</small></label>
+    <label>Quantity<input name="quantity" type="number" min="1" max="5000" value="{{ values.get('quantity', 1) }}" required></label>
+    <div class="span-all"><h3>Details for a new product</h3><p class="muted">Fill these when the product code has not yet synced from Lite. The Tally item defaults to the product name.</p></div>
+    <label>Product name<input name="product_name" value="{{ values.get('product_name', '') }}" maxlength="180"></label>
+    <label>Tally stock item<input name="tally_stock_item_name" value="{{ values.get('tally_stock_item_name', '') }}" maxlength="180"></label>
+    <label>HSN<input name="hsn" value="{{ values.get('hsn', '') }}" maxlength="40"></label>
+    <label>Unit<input name="unit" value="{{ values.get('unit', 'Pcs') }}" maxlength="40"></label>
+    <label>GST rate %<input name="gst_rate" type="number" min="0" max="100" step="any" value="{{ values.get('gst_rate', 0) }}"></label>
+    <label>Default rate<input name="default_rate" type="number" min="0" step="any" value="{{ values.get('default_rate', 0) }}"></label>
+    <label>Sales discount %<input name="sales_discount_rate" type="number" min="0" max="100" step="any" value="{{ values.get('sales_discount_rate', 0) }}"></label>
+    <div class="span-all"><h3>Optional label details</h3></div>
+    <label>Product batch<input name="product_batch_number" value="{{ values.get('product_batch_number', '') }}" maxlength="80"></label>
+    <label>Manufactured on<input name="mfg_date" type="date" value="{{ values.get('mfg_date', '') }}"></label>
+    <label>Expires on<input name="expiry_date" type="date" value="{{ values.get('expiry_date', '') }}"></label>
+    <label>Warehouse<input name="warehouse" value="{{ values.get('warehouse', '') }}" maxlength="80"></label>
+    <label>Warehouse level<select name="warehouse_level">{% for level in warehouse_levels %}<option value="{{ level }}" {% if values.get('warehouse_level', 'Company Warehouse') == level %}selected{% endif %}>{{ level }}</option>{% endfor %}</select></label>
+    <div class="span-all"><button class="button primary" type="submit" {% if not node.active %}disabled{% endif %}>Create and send QR codes</button></div>
+  </form>
+</section>
+<section class="panel">
+  <div class="section-title"><h2>Recent QR allocations</h2><span>Each part contains up to 500 serials.</span></div>
+  <div class="table-scroll"><table>
+    <thead><tr><th scope="col">Created</th><th scope="col">Product</th><th scope="col">Part</th><th scope="col" class="numeric">QR codes</th><th scope="col">Lite sync</th><th scope="col">Labels</th></tr></thead>
+    <tbody>
+    {% for entry in commands %}
+      <tr>
+        <td>{{ entry.command.created_at|report_date }}</td>
+        <td>{{ entry.payload.product.product_code }}<small>{{ entry.payload.product.product_name }}</small></td>
+        <td>{{ entry.payload.part_number }} of {{ entry.payload.part_count }}</td>
+        <td class="numeric">{{ entry.payload.serials|length }}</td>
+        <td>{{ 'Received' if entry.command.acknowledged_at else 'Waiting for Lite' }}</td>
+        <td><a class="button small" href="/franchises/{{ node.public_id }}/qr/{{ entry.command.public_id }}/labels">Print labels</a></td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="empty">No QR codes allocated yet.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

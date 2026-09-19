@@ -172,6 +172,9 @@ def list_unacknowledged_commands(
     *,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
+    # Lite caps a response body at 5 MiB. A backlog of otherwise valid QR
+    # commands can exceed that limit when the count alone is capped at 100.
+    response_budget = 4 * 1024 * 1024
     commands = db.scalars(
         select(NodeCommand)
         .where(
@@ -181,7 +184,22 @@ def list_unacknowledged_commands(
         .order_by(NodeCommand.id)
         .limit(max(1, min(limit, 100)))
     ).all()
-    return [_serialize_command(command) for command in commands]
+    result: list[dict[str, Any]] = []
+    used_bytes = 0
+    for command in commands:
+        serialized = _serialize_command(command)
+        command_bytes = len(_canonical_json(serialized).encode("utf-8")) + 1
+        if command_bytes > response_budget:
+            raise NetworkIngestError(
+                413,
+                "COMMAND_TOO_LARGE",
+                "A queued command is too large for Lite to receive.",
+            )
+        if used_bytes + command_bytes > response_budget:
+            break
+        result.append(serialized)
+        used_bytes += command_bytes
+    return result
 
 
 def acknowledge_command(
@@ -449,6 +467,19 @@ def _replacement_snapshot_event(
         item=new_item,
     )
 
+    # A Lite node can report a replacement only for the exact serial identity
+    # reserved by Master for this old QR. The command ID is the event reference.
+    from app.services.qr_replacement_intent import validate_replacement_intent
+
+    intent = validate_replacement_intent(
+        db,
+        franchise=node,
+        command_public_id=event.reference,
+        old_serial=old_serial,
+        old_stock=old_stock,
+        new_serial_number=new_item.serial_number,
+    )
+
     previous_status = old_stock.status
     _update_serial_snapshot(old_serial, node, old_item)
     replacement = Serial(
@@ -521,6 +552,7 @@ def _replacement_snapshot_event(
             ),
         ]
     )
+    intent.completed_at = utc_now()
     return {
         "created": 1,
         "updated": 1,
@@ -542,6 +574,30 @@ def _snapshot_event(
     if (event.reason_code or "").strip().upper() == "QR_REPLACEMENT":
         return _replacement_snapshot_event(db, node, inbound, event)
 
+    initial_reference = f"{node.code}:INITIAL-INVENTORY:PART-{event.sequence}"
+    previous = (
+        db.scalar(
+            select(InboundEvent).where(
+                InboundEvent.franchise_id == node.id,
+                InboundEvent.sequence == event.sequence - 1,
+            )
+        )
+        if event.sequence > 1
+        else None
+    )
+    initial_sequence_continues = event.sequence == 1 or (
+        previous is not None
+        and previous.event_type == NetworkEventType.STOCK_SNAPSHOT.value
+        and previous.reference == f"{node.code}:INITIAL-INVENTORY:PART-{event.sequence - 1}"
+        and json.loads(previous.payload_json).get("reason_code") == "INITIAL_ENROLLMENT"
+    )
+    is_initial_enrollment = (
+        event.type == NetworkEventType.STOCK_SNAPSHOT
+        and event.reason_code == "INITIAL_ENROLLMENT"
+        and event.reference == initial_reference
+        and initial_sequence_continues
+    )
+
     created = 0
     updated = 0
     for item in event.items:
@@ -553,6 +609,15 @@ def _snapshot_event(
             )
         serial, stock = _find_serial_and_stock(db, item.serial_number)
         if serial is None:
+            if not is_initial_enrollment:
+                raise NetworkIngestError(
+                    409,
+                    "MASTER_QR_REQUIRED",
+                    (
+                        f"Serial {item.serial_number} was not allocated by Master. "
+                        "Create its QR code on Master and sync it to Lite first."
+                    ),
+                )
             if item.status not in SNAPSHOT_ENROLLMENT_STATUSES:
                 raise NetworkIngestError(
                     409,
@@ -731,14 +796,14 @@ def _inventory_event(
     for item in event.items:
         serial, stock = _find_serial_and_stock(db, item.serial_number)
         if serial is None:
-            if event.type not in {NetworkEventType.PURCHASE, NetworkEventType.RECEIVE}:
-                raise NetworkIngestError(
-                    409,
-                    "STOCK_UNKNOWN",
-                    f"Serial {item.serial_number} is not known to the network.",
-                )
-            serial = _create_serial(db, node, item)
-            stock = None
+            raise NetworkIngestError(
+                409,
+                "MASTER_QR_REQUIRED",
+                (
+                    f"Serial {item.serial_number} was not allocated by Master. "
+                    "Create its QR code on Master and sync it to Lite first."
+                ),
+            )
 
         if stock is not None and stock.current_franchise_id != node.id:
             raise NetworkIngestError(
@@ -747,20 +812,11 @@ def _inventory_event(
                 f"Serial {item.serial_number} is owned by another franchise.",
             )
         if stock is None:
-            if event.type not in {NetworkEventType.PURCHASE, NetworkEventType.RECEIVE}:
-                raise NetworkIngestError(
-                    409,
-                    "STOCK_UNKNOWN",
-                    f"Serial {item.serial_number} has no network ownership record.",
-                )
-            stock = NetworkStock(
-                serial_id=serial.id,
-                current_franchise_id=node.id,
-                origin_franchise_id=node.id,
-                status=serial.status,
-                last_event_id=inbound.id,
+            raise NetworkIngestError(
+                409,
+                "STOCK_TRACKING_CONFLICT",
+                f"Serial {item.serial_number} has no network ownership record.",
             )
-            db.add(stock)
 
         # Financial vouchers use the authoritative product record. Reject a
         # changed client identity instead of posting stale GST or item mapping.

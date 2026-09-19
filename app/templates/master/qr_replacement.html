@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}QR replacements - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Setuora Master</p>
+    <h1>QR replacements</h1>
+    <p class="muted">Reserve a replacement QR for a franchise. Lite applies it during sync and reports the completed change to Master.</p>
+  </div>
+</section>
+
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
+
+<section class="panel">
+  <div class="section-title"><h2>Request a replacement</h2></div>
+  <form method="post" action="/network/qr-replacements" class="stack">
+    <label>Franchise
+      <select name="franchise_id" required>
+        {% for franchise in franchises %}
+        <option value="{{ franchise.id }}">{{ franchise.code }} — {{ franchise.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Old QR serial<input name="old_serial_number" required maxlength="140" autocomplete="off"></label>
+    <label>Reason<textarea name="reason" maxlength="500" rows="3"></textarea></label>
+    <button class="button primary" type="submit" {% if not franchises %}disabled{% endif %}>Reserve replacement QR</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Recent requests</h2></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Franchise</th><th>Old QR</th><th>New QR</th><th>Status</th><th>Requested by</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.franchise.code if row.franchise else '?' }}</td>
+          <td class="cell-code">{{ row.old_serial.serial_number if row.old_serial else '?' }}</td>
+          <td class="cell-code">{{ row.intent.new_serial_number }}</td>
+          <td><span class="status {{ 'synced' if row.intent.completed_at else 'pending' }}">{{ 'Completed' if row.intent.completed_at else 'Applied on Lite; awaiting event' if row.command and row.command.acknowledged_at else 'Waiting for Lite' }}</span></td>
+          <td>{{ row.intent.requested_by }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No QR replacements requested.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

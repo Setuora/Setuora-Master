@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}QR labels - {{ node.code }} - Setuora Master{% endblock %}
+{% block content %}
+<style>
+  .qr-label-grid { display: grid; grid-template-columns: repeat(4, 48.5mm); gap: 2mm; margin: 16px 0; }
+  .qr-label { width: 48.5mm; height: 25.4mm; box-sizing: border-box; border: 1px solid #bbb; display: flex; align-items: center; gap: 1mm; padding: 1mm; overflow: hidden; break-inside: avoid; background: white; color: black; }
+  .qr-label img { width: 21mm; height: 21mm; flex: none; }
+  .qr-label div { min-width: 0; font: 7pt/1.2 Arial, sans-serif; overflow-wrap: anywhere; }
+  .qr-label strong { display: block; font-size: 8pt; }
+  @media print { .global-nav, .page-head, .label-actions, .profile-menu, .nav-menu { display: none !important; } .page { padding: 0 !important; margin: 0 !important; max-width: none !important; } .qr-label-grid { margin: 0; gap: 0; } .qr-label { border: 0; } @page { size: A4; margin: 4mm; } }
+</style>
+<section class="page-head"><div><p class="eyebrow">{{ node.code }} · part {{ payload.part_number }} of {{ payload.part_count }}</p><h1>QR labels</h1><p class="muted">{{ payload.product.product_name }} · page {{ page }} of {{ page_count }}</p></div></section>
+<div class="actions label-actions"><button class="button primary" type="button" onclick="window.print()">Print this page</button><a class="button" href="/franchises/{{ node.public_id }}/qr">Back to allocations</a>{% if page > 1 %}<a class="button" href="?page={{ page - 1 }}">Previous</a>{% endif %}{% if page < page_count %}<a class="button" href="?page={{ page + 1 }}">Next</a>{% endif %}</div>
+<div class="qr-label-grid">
+  {% for serial in serials %}
+  <div class="qr-label"><img src="/franchises/{{ node.public_id }}/qr/{{ serial.serial_number }}/image.svg" alt="QR for {{ serial.serial_number }}"><div><strong>{{ payload.product.product_code }}</strong>{{ serial.serial_number }}{% if serial.product_batch_number %}<br>Batch {{ serial.product_batch_number }}{% endif %}</div></div>
+  {% endfor %}
+</div>
+{% endblock %}

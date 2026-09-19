@@ -7,3 +7,4 @@ sqlalchemy==2.0.25
 jinja2==3.1.6
 python-multipart==0.0.32
 pydantic==2.13.4
+qrcode==8.2

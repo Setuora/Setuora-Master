@@ -17,6 +17,7 @@ from app.models import (
     NetworkStock,
     NodeCommand,
     NodeCredential,
+    Product,
     Serial,
     StockTransfer,
     TransferStatus,
@@ -25,12 +26,14 @@ from app.models import (
 from app.routers.master_console import _movement_rows
 from app.routers.master_console import router as master_router
 from app.routers.node_api import router as node_api_router
+from app.services.network_ingest import acknowledge_command, queue_node_command
 from app.services.node_auth import (
     clear_node_rate_limits,
     create_franchise_node,
     parse_api_key,
     provision_node_credential,
 )
+from app.services.qr_replacement_intent import request_qr_replacement
 from tests.factories import authenticate_client
 
 NOW = datetime(2026, 7, 29, 12, 0, tzinfo=UTC).isoformat()
@@ -74,6 +77,55 @@ def event(
     }
     payload.update(values)
     return payload
+
+
+def initial_snapshot(node, items: list[dict], *, sequence: int = 1) -> dict:
+    return event(
+        sequence,
+        "STOCK_SNAPSHOT",
+        items,
+        reference=f"{node.code}:INITIAL-INVENTORY:PART-{sequence}",
+        reason_code="INITIAL_ENROLLMENT",
+    )
+
+
+def seed_master_qr(db, node, stock_item: dict) -> None:
+    """Set up a Master-owned generated QR before a Lite purchase event."""
+
+    from app.services.network_ingest import _namespaced_code
+
+    code = _namespaced_code(node, stock_item["product_code"])
+    product = db.scalar(select(Product).where(Product.product_code == code))
+    if product is None:
+        product = Product(
+            product_code=code,
+            product_name=stock_item["product_name"],
+            tally_stock_item_name=stock_item["tally_stock_item_name"],
+            hsn=stock_item["hsn"],
+            gst_rate=stock_item["gst_rate"],
+            unit=stock_item["unit"],
+            default_rate=stock_item["rate"],
+        )
+        db.add(product)
+        db.flush()
+    serial = Serial(
+        serial_number=stock_item["serial_number"],
+        product_id=product.id,
+        status="GENERATED",
+        warehouse=stock_item["warehouse"],
+    )
+    db.add(serial)
+    db.flush()
+    db.add(
+        NetworkStock(
+            serial_id=serial.id,
+            current_franchise_id=node.id,
+            origin_franchise_id=node.id,
+            status="GENERATED",
+            last_event_id=None,
+        )
+    )
+    db.commit()
 
 
 @pytest.fixture()
@@ -128,7 +180,8 @@ def post(api: TestClient, api_key: str, *events: dict):
 def test_uncertain_tally_voucher_requires_admin_reconciliation(api, resolution):
     client, db = api
     client.app.include_router(master_router)
-    _, api_key = create_node_with_key(db, "REVIEW")
+    node, api_key = create_node_with_key(db, "REVIEW")
+    seed_master_qr(db, node, item("REVIEW-1"))
     response = post(
         client, api_key, event(1, "PURCHASE", [item("REVIEW-1")], party_name="Supplier")
     )
@@ -236,6 +289,7 @@ def test_event_idempotency_gap_conflicts_and_franchise_isolation(api):
     api, db_session = api
     first_node, first_key = create_node_with_key(db_session, "A")
     second_node, second_key = create_node_with_key(db_session, "B")
+    seed_master_qr(db_session, first_node, item("QR-IDEMPOTENT"))
     purchase = event(
         1,
         "PURCHASE",
@@ -283,9 +337,57 @@ def test_event_idempotency_gap_conflicts_and_franchise_isolation(api):
     assert second_node.last_sequence == 0
 
 
+def test_legacy_qr_enrollment_closes_after_empty_initialization(api):
+    client, db = api
+    node, api_key = create_node_with_key(db, "EMPTYBASE")
+    initialized = post(
+        client,
+        api_key,
+        event(
+            1,
+            "HEARTBEAT",
+            reference=f"{node.code}:INITIAL-INVENTORY:EMPTY",
+            reason_code="INITIAL_ENROLLMENT",
+        ),
+    )
+    assert initialized.status_code == 200
+
+    late = post(client, api_key, initial_snapshot(node, [item("LITE-MADE-QR")], sequence=2))
+    assert late.status_code == 409
+    assert late.json()["error"]["code"] == "MASTER_QR_REQUIRED"
+    assert db.scalar(select(Serial).where(Serial.serial_number == "LITE-MADE-QR")) is None
+
+
+def test_command_backlog_is_split_below_lite_response_limit(api):
+    client, db = api
+    node, api_key = create_node_with_key(db, "QRBACKLOG")
+    for index in range(30):
+        queue_node_command(
+            db,
+            target=node,
+            command_type="QR_ALLOCATED",
+            payload={"part": index, "padding": "x" * 150_000},
+        )
+    db.commit()
+
+    first = client.get("/api/v1/commands", headers=auth(api_key))
+    assert first.status_code == 200
+    commands = first.json()["data"]["commands"]
+    assert 0 < len(commands) < 30
+    assert len(first.content) < 5 * 1024 * 1024
+    for command in commands:
+        acknowledge_command(db, node, command["command_id"])
+    db.commit()
+
+    second = client.get("/api/v1/commands", headers=auth(api_key))
+    assert second.status_code == 200
+    assert len(second.json()["data"]["commands"]) == 30 - len(commands)
+
+
 def test_purchase_then_sale_mirrors_inventory_and_queues_tally(api):
     api, db_session = api
     node, api_key = create_node_with_key(db_session, "A")
+    seed_master_qr(db_session, node, item("QR-PURCHASE-SALE"))
     purchase = event(
         1,
         "PURCHASE",
@@ -330,6 +432,8 @@ def test_dispatch_partial_and_full_receipt_move_global_ownership(api):
     destination, destination_key = create_node_with_key(db_session, "DEST")
     first_item = item("QR-TRANSFER-1")
     second_item = item("QR-TRANSFER-2", product_code="SKU-2")
+    seed_master_qr(db_session, source, first_item)
+    seed_master_qr(db_session, source, second_item)
 
     purchase = event(
         1,
@@ -470,7 +574,7 @@ def test_snapshot_cannot_resurrect_terminal_stock(
         post(
             api,
             api_key,
-            event(1, "STOCK_SNAPSHOT", [item(serial_number)]),
+            initial_snapshot(node, [item(serial_number)]),
         ).status_code
         == 200
     )
@@ -505,13 +609,13 @@ def test_snapshot_cannot_resurrect_terminal_stock(
 
 def test_snapshot_same_status_relocation_updates_only_metadata(api):
     api, db_session = api
-    _node, api_key = create_node_with_key(db_session, "RELOCATE")
+    node, api_key = create_node_with_key(db_session, "RELOCATE")
     serial_number = "QR-SNAPSHOT-RELOCATE"
     assert (
         post(
             api,
             api_key,
-            event(1, "STOCK_SNAPSHOT", [item(serial_number)]),
+            initial_snapshot(node, [item(serial_number)]),
         ).status_code
         == 200
     )
@@ -541,15 +645,23 @@ def test_valid_replacement_retires_old_and_preserves_origin_product(api):
     api, db_session = api
     node, api_key = create_node_with_key(db_session, "REPLACE")
     old_number = "QR-REPLACE-OLD"
-    new_number = "QR-REPLACE-NEW"
     assert (
         post(
             api,
             api_key,
-            event(1, "STOCK_SNAPSHOT", [item(old_number)]),
+            initial_snapshot(node, [item(old_number)]),
         ).status_code
         == 200
     )
+
+    intent, command = request_qr_replacement(
+        db_session,
+        franchise=node,
+        old_serial_number=old_number,
+        requested_by="test-admin",
+    )
+    db_session.commit()
+    new_number = intent.new_serial_number
 
     old_item = item(old_number, status="INVALID")
     old_item["warehouse"] = "REPLACEMENT-SHELF"
@@ -563,6 +675,7 @@ def test_valid_replacement_retires_old_and_preserves_origin_product(api):
             "STOCK_SNAPSHOT",
             [old_item, new_item],
             reason_code="QR_REPLACEMENT",
+            reference=command.public_id,
         ),
     )
 
@@ -621,7 +734,7 @@ def test_invalid_replacement_is_atomic(
         post(
             api,
             api_key,
-            event(1, "STOCK_SNAPSHOT", [item(old_number)]),
+            initial_snapshot(node, [item(old_number)]),
         ).status_code
         == 200
     )

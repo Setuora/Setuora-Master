@@ -16,7 +16,7 @@ from app.services.tally import (
     sync_batch,
 )
 from app.services.voucher import calculate_voucher_summary
-from tests.test_network_sync import event, item
+from tests.test_network_sync import event, initial_snapshot, item
 from tests.test_tally import VALID_SETTINGS
 
 
@@ -29,7 +29,7 @@ def test_network_sale_preserves_discount_and_franchise_godown(db_session):
     request = EventBatchRequest.model_validate(
         {
             "events": [
-                event(1, "STOCK_SNAPSHOT", [stock]),
+                initial_snapshot(node, [stock]),
                 event(2, "SALE", [sale], party_name="Customer"),
             ]
         }
@@ -54,7 +54,7 @@ def test_zero_network_sale_price_stays_zero(db_session):
     request = EventBatchRequest.model_validate(
         {
             "events": [
-                event(1, "STOCK_SNAPSHOT", [stock]),
+                initial_snapshot(node, [stock]),
                 event(2, "SALE", [{**stock, "rate": 0}], party_name="Customer"),
             ]
         }
@@ -86,7 +86,7 @@ def test_network_sale_rejects_changed_accounting_product_identity(db_session, ch
     ingest_events(
         db_session,
         node,
-        EventBatchRequest.model_validate({"events": [event(1, "STOCK_SNAPSHOT", [stock])]}),
+        EventBatchRequest.model_validate({"events": [initial_snapshot(node, [stock])]}),
     )
     db_session.commit()
     with pytest.raises(NetworkIngestError) as caught:
@@ -111,7 +111,7 @@ def test_timeout_pauses_central_queue_until_verified_absent(db_session, monkeypa
         EventBatchRequest.model_validate(
             {
                 "events": [
-                    event(1, "STOCK_SNAPSHOT", [stock]),
+                    initial_snapshot(node, [stock]),
                     event(2, "SALE", [stock], party_name="Customer"),
                     event(3, "SALES_RETURN", [stock], party_name="Customer"),
                 ]

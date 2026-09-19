@@ -15,6 +15,12 @@ Lite C ── HTTPS events/commands ──┘              │
 
 Each Lite has a unique franchise identity and bearer credential. Master checks event order and identity, applies each event idempotently, and records network inventory and transfers. Purchase, receive, sale, and sales return events become pending Tally batches. A single Master retry worker processes pending supported vouchers and records success or failure. Acknowledging an event to Lite means Master accepted it; Tally may still be pending.
 
+Master allocates new franchise QR serials and queues their product and serial data for the assigned Lite. Lite receives the records through its normal command poll, stores them locally, and can then use the labels in franchise workflows. Commands remain queued while Lite is offline and are acknowledged after Lite applies them. Generate labels for a franchise in Master after its connection has been set up.
+
+To issue QRs, open **Franchises → Create QR codes** for the target franchise. Enter its Lite product code and quantity; if Master has not seen that product yet, also enter its product details. The allocation page shows delivery status and printable labels. Use **Franchises → Replace a QR code** for damaged labels; Master reserves the new serial, Lite applies the replacement, and Master records the completion event. Historical Lite stock is imported only during the initial inventory enrollment.
+
+Before upgrading an existing network to this QR workflow, let every Lite deliver its pending events from locally created QR labels. Master now rejects new purchase or stock events for serials it did not issue, apart from each node's initial historical inventory enrollment. An offline Lite with older unsent QR events needs to reconnect and drain that queue before the upgrade.
+
 The former SFTP debtor/creditor worker, which assumed Tally at each franchise, is not started in this deployment. SFTP source and scripts remain for migration reference.
 
 ## Network boundary

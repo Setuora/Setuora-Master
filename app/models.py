@@ -1005,8 +1005,9 @@ class NetworkStock(Base):
         index=True,
     )
     status: Mapped[str] = mapped_column(String(40), index=True)
-    last_event_id: Mapped[int] = mapped_column(
+    last_event_id: Mapped[int | None] = mapped_column(
         ForeignKey("inbound_events.id"),
+        nullable=True,
         index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
@@ -1151,3 +1152,22 @@ class NodeCommand(Base):
         back_populates="commands",
         foreign_keys=[target_franchise_id],
     )
+
+
+class QrAllocation(Base):
+    """One idempotent Master request to allocate QR serials for a franchise."""
+
+    __tablename__ = "qr_allocations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    franchise_id: Mapped[int] = mapped_column(ForeignKey("franchise_nodes.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    quantity: Mapped[int] = mapped_column(Integer)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    franchise: Mapped[FranchiseNode] = relationship()
+    product: Mapped[Product] = relationship()
+    created_by: Mapped[User | None] = relationship()

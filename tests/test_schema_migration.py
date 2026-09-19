@@ -1,9 +1,108 @@
+from uuid import uuid4
+
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Batch, BatchItem, Product, Serial, StorageLocation, User
+from app.models import (
+    Batch,
+    BatchItem,
+    InboundEvent,
+    Product,
+    Serial,
+    StorageLocation,
+    User,
+    utc_now,
+)
+from app.services.node_auth import create_franchise_node
 from app.services.schema import _rebuild_sqlite_inventory_tables, ensure_runtime_schema
+
+
+def test_existing_network_stock_allows_master_allocations_after_migration(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'old-network-stock.db'}")
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    with Session() as db:
+        node = create_franchise_node(db, code="MIG-QR", name="Migration QR", location="Main")
+        product = Product(
+            product_code="MIG-QR:PROD",
+            product_name="Migration product",
+            hsn="1234",
+            gst_rate=5,
+            unit="Pcs",
+            default_rate=10,
+            tally_stock_item_name="Migration product",
+        )
+        db.add(product)
+        db.flush()
+        old_serial = Serial(serial_number="OLD-QR", product_id=product.id, status="IN_STOCK")
+        new_serial = Serial(serial_number="SQR-00000000000000000000000000000001", product_id=product.id)
+        inbound = InboundEvent(
+            event_id=str(uuid4()),
+            franchise_id=node.id,
+            sequence=1,
+            schema_version=1,
+            event_type="STOCK_SNAPSHOT",
+            occurred_at=utc_now(),
+            payload_json="{}",
+            payload_hash="old",
+            result_json="{}",
+        )
+        db.add_all([old_serial, new_serial, inbound])
+        db.commit()
+        old_serial_id, new_serial_id, inbound_id, node_id = (
+            old_serial.id,
+            new_serial.id,
+            inbound.id,
+            node.id,
+        )
+
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE network_stock"))
+        connection.execute(
+            text(
+                "CREATE TABLE network_stock ("
+                "id INTEGER PRIMARY KEY, serial_id INTEGER NOT NULL UNIQUE REFERENCES serials(id), "
+                "current_franchise_id INTEGER NOT NULL REFERENCES franchise_nodes(id), "
+                "origin_franchise_id INTEGER NOT NULL REFERENCES franchise_nodes(id), "
+                "status VARCHAR(40) NOT NULL, "
+                "last_event_id INTEGER NOT NULL REFERENCES inbound_events(id), "
+                "updated_at DATETIME NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO network_stock "
+                "(id, serial_id, current_franchise_id, origin_franchise_id, status, "
+                "last_event_id, updated_at) "
+                "VALUES (1, :serial_id, :node_id, :node_id, 'IN_STOCK', :event_id, :now)"
+            ),
+            {"serial_id": old_serial_id, "node_id": node_id, "event_id": inbound_id, "now": utc_now()},
+        )
+
+    ensure_runtime_schema(engine)
+
+    event_column = next(
+        column for column in inspect(engine).get_columns("network_stock")
+        if column["name"] == "last_event_id"
+    )
+    assert event_column["nullable"] is True
+    with engine.begin() as connection:
+        assert connection.scalar(text("SELECT serial_id FROM network_stock WHERE id=1")) == old_serial_id
+        connection.execute(
+            text(
+                "INSERT INTO network_stock "
+                "(serial_id, current_franchise_id, origin_franchise_id, status, "
+                "last_event_id, updated_at) "
+                "VALUES (:serial_id, :node_id, :node_id, 'GENERATED', NULL, :now)"
+            ),
+            {"serial_id": new_serial_id, "node_id": node_id, "now": utc_now()},
+        )
 
 
 def test_runtime_schema_adds_sale_gst_columns_to_batches(tmp_path):

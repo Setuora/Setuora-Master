@@ -213,16 +213,18 @@ def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(deploy, "_run", lambda command: calls.append(command))
     deploy._secure_private_storage()
 
-    assert [command[1] for command in calls] == [str(tmp_path / "data"), str(tmp_path / "logs")]
-    for command in calls:
-        assert command[0] == "icacls.exe"
-        assert "/inheritance:r" in command
-        assert "/T" in command
-        assert "*S-1-5-18:(OI)(CI)F" in command
-        assert "*S-1-5-32-544:(OI)(CI)F" in command
-        assert "*S-1-1-0" in command
-        assert "*S-1-5-11" in command
-        assert "*S-1-5-32-545" in command
+    for index, directory in enumerate((tmp_path / "data", tmp_path / "logs")):
+        commands = calls[index * 4 : (index + 1) * 4]
+        assert all(command[:2] == ["icacls.exe", str(directory)] for command in commands)
+        assert all("/T" in command for command in commands)
+        assert commands[0][2] == "/grant"
+        assert "*S-1-5-18:F" in commands[0]
+        assert "*S-1-5-32-544:F" in commands[0]
+        assert "*S-1-5-18:(OI)(CI)F" in commands[1]
+        assert "*S-1-5-32-544:(OI)(CI)F" in commands[1]
+        assert "/inheritance:r" in commands[2]
+        assert commands[3][2] == "/remove:g"
+        assert {"*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"}.issubset(commands[3])
 
 
 def test_source_update_stops_before_mutating_application_files():
@@ -569,6 +571,41 @@ def test_private_serve_refuses_funnel_and_overlapping_routes(monkeypatch):
 
     config = {"Web": {f"{host}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}}}}
     with pytest.raises(deploy.DeploymentError, match="exposes the Master admin console"):
+        deploy._ensure_private_serve("tailscale.exe", host)
+    assert calls == []
+
+
+def test_private_serve_accepts_https_marker_but_refuses_tcp_forward(monkeypatch):
+    import subprocess
+
+    import pytest
+
+    host = "master.example.ts.net"
+    target = "http://127.0.0.1:8000/api/v1/"
+    calls = []
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], {"SETUORA_WEB_PORT": "8000"}))
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+    before = {"TCP": {"443": {"HTTPS": True}}}
+    after = {
+        "TCP": {"443": {"HTTPS": True}},
+        "Web": {f"{host}:443": {"Handlers": {deploy.NODE_PATH: {"Proxy": target}}}},
+    }
+    states = iter([before, after])
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: next(states))
+    deploy._ensure_private_serve("tailscale.exe", host)
+    assert len(calls) == 1
+
+    calls.clear()
+    monkeypatch.setattr(
+        deploy,
+        "_tailscale_json",
+        lambda *args: {"TCP": {"443": {"TCPForward": "127.0.0.1:8080"}}},
+    )
+    with pytest.raises(deploy.DeploymentError, match="TCP route"):
         deploy._ensure_private_serve("tailscale.exe", host)
     assert calls == []
 

@@ -282,18 +282,26 @@ def _secure_private_storage() -> None:
     if sys.platform != "win32":
         return
     for directory in (PROJECT_ROOT / "data", PROJECT_ROOT / "logs"):
+        _run(["icacls.exe", str(directory), "/grant", "*S-1-5-18:F", "*S-1-5-32-544:F", "/T"])
         _run(
             [
                 "icacls.exe",
                 str(directory),
-                "/inheritance:r",
+                "/grant",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+                "/T",
+            ]
+        )
+        _run(["icacls.exe", str(directory), "/inheritance:r", "/T"])
+        _run(
+            [
+                "icacls.exe",
+                str(directory),
                 "/remove:g",
                 "*S-1-1-0",
                 "*S-1-5-11",
                 "*S-1-5-32-545",
-                "/grant:r",
-                "*S-1-5-18:(OI)(CI)F",
-                "*S-1-5-32-544:(OI)(CI)F",
                 "/T",
             ]
         )
@@ -660,6 +668,23 @@ def _serve_handler(config: dict[str, object], host: str) -> tuple[object, bool]:
     return handlers, public
 
 
+def _check_serve_https_port(config: dict[str, object]) -> None:
+    tcp = config.get("TCP") or {}
+    if not isinstance(tcp, dict):
+        raise DeploymentError("Tailscale Serve returned unexpected TCP route data.")
+    for port, handler in tcp.items():
+        if str(port).split(":")[-1] != "443":
+            continue
+        # Tailscale also records normal HTTPS Serve under TCP. A TCP forward
+        # conflicts with the web route; the HTTPS marker does not.
+        if (
+            not isinstance(handler, dict)
+            or handler.get("HTTPS") is not True
+            or handler.get("TCPForward")
+        ):
+            raise DeploymentError("Tailscale port 443 is already used by a TCP route.")
+
+
 def _ensure_private_serve(executable: str, host: str) -> None:
     try:
         config = _tailscale_json(executable, "serve", "status", "--json")
@@ -667,6 +692,7 @@ def _ensure_private_serve(executable: str, host: str) -> None:
         raise TailscaleUnavailable(
             "Tailscale Serve is offline. Retry when the tailnet is connected."
         ) from exc
+    _check_serve_https_port(config)
     handlers, public = _serve_handler(config, host)
     if public:
         raise DeploymentError(
@@ -855,6 +881,7 @@ def _check_private_api_status() -> str:
         raise TailscaleUnavailable(
             "Master is running locally, but Tailscale Serve is offline."
         ) from exc
+    _check_serve_https_port(config)
     handlers, public = _serve_handler(config, host)
     if public or not isinstance(handlers, dict):
         raise DeploymentError(

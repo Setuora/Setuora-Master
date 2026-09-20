@@ -10,6 +10,8 @@ import platform
 import re
 import secrets
 import shutil
+import socket
+import stat
 import subprocess  # nosec B404
 import sys
 import tempfile
@@ -29,7 +31,8 @@ RUNNER_PATH = WINDOWS_SCRIPTS / "run-server.cmd"
 TASK_NAME = "Setuora-Master"
 TAILSCALE_URL_SETTING = "SETUORA_TAILSCALE_URL"
 NODE_PATH = "/api/v1/"
-NODE_TARGET = "http://127.0.0.1:8000/api/v1/"
+DEFAULT_WEB_PORT = 8000
+PORT_PATH = PROJECT_ROOT / "runtime-port.txt"
 UNSAFE_PASSWORDS = {
     "",
     "admin123",
@@ -86,6 +89,51 @@ def _read_env() -> tuple[list[str], dict[str, str]]:
             value = value[1:-1]
         values[key] = value
     return lines, values
+
+
+def _web_port(values: dict[str, str] | None = None) -> int:
+    if values is None:
+        _, values = _read_env()
+    try:
+        port = int(values.get("SETUORA_WEB_PORT") or DEFAULT_WEB_PORT)
+    except ValueError as exc:
+        raise DeploymentError("SETUORA_WEB_PORT must be a TCP port number.") from exc
+    if not 1024 <= port <= 65535:
+        raise DeploymentError("SETUORA_WEB_PORT must be between 1024 and 65535.")
+    return port
+
+
+def _public_web_port() -> int:
+    """Allow a normal desktop user to open the local console without reading .env."""
+    try:
+        return _web_port({"SETUORA_WEB_PORT": PORT_PATH.read_text(encoding="ascii").strip()})
+    except FileNotFoundError:
+        # Older installations have no public port file and always used 8000.
+        return DEFAULT_WEB_PORT
+
+
+def _node_target(port: int | None = None) -> str:
+    return f"http://127.0.0.1:{port or _web_port()}{NODE_PATH}"
+
+
+def _local_url(port: int | None = None) -> str:
+    return f"http://127.0.0.1:{port or _web_port()}"
+
+
+def _save_web_port(port: int) -> None:
+    _, values = _read_env()
+    previous = _web_port(values)
+    updates = {"SETUORA_WEB_PORT": str(port)}
+    if previous != port:
+        updates["SETUORA_PREVIOUS_WEB_PORT"] = str(previous)
+    _write_env(updates)
+    PORT_PATH.write_text(f"{port}\n", encoding="ascii")
+
+
+def _previous_node_target() -> str | None:
+    _, values = _read_env()
+    previous = values.get("SETUORA_PREVIOUS_WEB_PORT")
+    return _node_target(_web_port({"SETUORA_WEB_PORT": previous})) if previous else None
 
 
 def _format_env_value(value: str) -> str:
@@ -162,11 +210,9 @@ def _environment_issues(values: dict[str, str], *, has_application_data: bool) -
         issues.append("TRUSTED_HOSTS must include localhost and 127.0.0.1.")
 
     try:
-        web_port = int(values.get("SETUORA_WEB_PORT", "8000"))
-    except ValueError:
-        web_port = 0
-    if web_port != 8000:
-        issues.append("SETUORA_WEB_PORT must remain 8000 for the Windows service.")
+        _web_port(values)
+    except DeploymentError as exc:
+        issues.append(str(exc))
 
     if values.get("SFTP_SYNC_ENABLED", "false").strip().lower() == "true":
         issues.append("SFTP_SYNC_ENABLED must be false for the central-Tally deployment.")
@@ -221,10 +267,11 @@ def _prepare_environment() -> None:
             "SESSION_COOKIE_SECURE": "false",
             "TRUSTED_HOSTS": values.get("TRUSTED_HOSTS") or "127.0.0.1,localhost",
             "SFTP_SYNC_ENABLED": "false",
-            "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or "8000",
+            "SETUORA_WEB_PORT": values.get("SETUORA_WEB_PORT") or str(DEFAULT_WEB_PORT),
         }
     )
     _write_env(updates)
+    PORT_PATH.write_text(f"{_web_port({**values, **updates})}\n", encoding="ascii")
     (PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
     (PROJECT_ROOT / "logs").mkdir(parents=True, exist_ok=True)
     _secure_private_storage()
@@ -313,13 +360,11 @@ def _ensure_task() -> None:
 
 
 def _wait_for_health(timeout_seconds: int = 120) -> None:
-    _, values = _read_env()
-    port = values.get("SETUORA_WEB_PORT", "8000")
     deadline = time.monotonic() + timeout_seconds
-    url = f"http://127.0.0.1:{port}/health"
+    url = _local_url() + "/health"
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=3) as response:  # nosec B310
+            with urllib.request.urlopen(url, timeout=3) as response:  # noqa: S310  # nosec B310
                 payload = json.load(response)
             if payload == {"status": "ok", "role": "master"}:
                 return
@@ -334,22 +379,23 @@ def _wait_for_stop(timeout_seconds: int = 30) -> None:
     # Inspect actual listeners before replacing runtime files.
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if not _port_listeners():
+        if not any(_is_own_listener(item) for item in _port_listeners()):
             return
         time.sleep(0.5)
     raise DeploymentError(
-        "Port 8000 is still in use after stopping the task. "
+        f"Master still owns port {_web_port()} after stopping the task. "
         "Check the running Setuora process before updating files."
     )
 
 
-def _port_listeners() -> list[dict[str, object]]:
-    """Read all Windows TCP listeners on our fixed port, including wildcard binds."""
+def _port_listeners(port: int | None = None) -> list[dict[str, object]]:
+    """Read TCP listeners on a candidate port, including wildcard binds."""
+    port = port or _web_port()
     script = (
-        "$items = @(Get-NetTCPConnection -State Listen -LocalPort 8000 "
+        f"$items = @(Get-NetTCPConnection -State Listen -LocalPort {port} "
         "-ErrorAction SilentlyContinue | ForEach-Object { "
         "$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.OwningProcess) "
-        "-ErrorAction Stop; [pscustomobject]@{Pid=$_.OwningProcess; "
+        "-ErrorAction SilentlyContinue; [pscustomobject]@{Pid=$_.OwningProcess; "
         "ExecutablePath=$p.ExecutablePath; CommandLine=$p.CommandLine} }); "
         "ConvertTo-Json -InputObject $items -Compress -Depth 3"
     )
@@ -357,9 +403,9 @@ def _port_listeners() -> list[dict[str, object]]:
     try:
         listeners = json.loads(result.stdout or "[]")
     except ValueError as exc:
-        raise DeploymentError("Windows could not identify the process using port 8000.") from exc
+        raise DeploymentError(f"Windows could not identify the process using port {port}.") from exc
     if not isinstance(listeners, list) or any(not isinstance(item, dict) for item in listeners):
-        raise DeploymentError("Windows returned invalid process details for port 8000.")
+        raise DeploymentError(f"Windows returned invalid process details for port {port}.")
     return listeners
 
 
@@ -371,21 +417,77 @@ def _is_own_listener(listener: dict[str, object]) -> bool:
         executable == expected
         and "-m uvicorn app.main:app" in command
         and "--host 127.0.0.1" in command
-        and "--port 8000" in command
+        and re.search(rf"(?<!\S)--port\s+{_web_port()}(?!\d)", command) is not None
     )
 
 
 def _release_setuora_port() -> None:
     listeners = _port_listeners()
-    if any(not _is_own_listener(item) for item in listeners):
-        raise DeploymentError(
-            "Port 8000 belongs to another process. Close that application or choose a "
-            "different computer; Setuora will not terminate it."
-        )
-    for pid in sorted({int(item["Pid"]) for item in listeners}):
-        print(f"Stopping orphaned Setuora Master process {pid} on port 8000.")
+    owned = [item for item in listeners if _is_own_listener(item)]
+    for pid in sorted({int(item["Pid"]) for item in owned}):
+        print(f"Stopping orphaned Setuora Master process {pid} on port {_web_port()}.")
         _run(["taskkill.exe", "/PID", str(pid), "/F"])
-    _wait_for_stop(timeout_seconds=10 if listeners else 1)
+    _wait_for_stop(timeout_seconds=10 if owned else 1)
+
+
+def _can_bind_port(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+
+
+def _reserved_sibling_ports() -> set[int]:
+    """Keep Lite's saved app and Caddy ports free even while Lite is stopped."""
+    shared = Path(os.environ.get("PROGRAMDATA") or "C:/ProgramData") / "Setuora"
+    reserved: set[int] = set()
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    for name in ("Setuora-Lite", "Setuora-Lite-windows"):
+        root = shared / name
+        path = root / ".runtime-ports.json"
+        if not root.exists():
+            continue
+        if root.is_symlink() or getattr(root.lstat(), "st_file_attributes", 0) & reparse_flag:
+            raise DeploymentError(f"Lite installation folder is linked: {root}")
+        if not path.exists():
+            continue
+        if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & reparse_flag:
+            raise DeploymentError(f"Lite port file is linked: {path}")
+        if path.stat().st_size > 4096:
+            raise DeploymentError(f"Lite port file is unexpectedly large: {path}")
+        try:
+            values = json.loads(path.read_text(encoding="ascii"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise DeploymentError(
+                f"Lite port file is invalid: {path}. Run Lite Setup / repair."
+            ) from exc
+        if not isinstance(values, dict):
+            raise DeploymentError(f"Lite port file is invalid: {path}. Run Lite Setup / repair.")
+        for key in ("web_port", "caddy_port"):
+            port = values.get(key)
+            if type(port) is not int or not 1024 <= port <= 65535:
+                raise DeploymentError(
+                    f"Lite port file has an invalid {key}: {path}. Run Lite Setup / repair."
+                )
+            reserved.add(port)
+    return reserved
+
+
+def _select_available_web_port() -> int:
+    current = _web_port()
+    reserved = _reserved_sibling_ports()
+    candidates = [current, *(port for port in range(DEFAULT_WEB_PORT, 9000) if port != current)]
+    for port in candidates:
+        if port not in reserved and not _port_listeners(port) and _can_bind_port(port):
+            if port != current:
+                print(
+                    f"Local port {current} is occupied or reserved; Setuora Master will use {port}."
+                )
+            _save_web_port(port)
+            return port
+    raise DeploymentError("No free local web port is available from 8000 through 8999.")
 
 
 def _find_tailscale_executable() -> str | None:
@@ -443,7 +545,7 @@ def _tailscale_executable() -> str:
     print("Downloading the signed Tailscale installer from pkgs.tailscale.com...")
     with tempfile.TemporaryDirectory(prefix="setuora-tailscale-") as directory:
         installer = Path(directory) / "tailscale.msi"
-        with urllib.request.urlopen(url, timeout=60) as response, installer.open("wb") as target:  # nosec B310
+        with urllib.request.urlopen(url, timeout=60) as response, installer.open("wb") as target:  # noqa: S310  # nosec B310
             shutil.copyfileobj(response, target)
         signature_script = (
             "$signature = Get-AuthenticodeSignature -LiteralPath $args[0]; "
@@ -572,10 +674,21 @@ def _ensure_private_serve(executable: str, host: str) -> None:
         )
     if not isinstance(handlers, dict):
         raise DeploymentError("Tailscale Serve returned unexpected handler data.")
+    target = _node_target()
+    previous_target = _previous_node_target()
     for path, handler in handlers.items():
-        if path == NODE_PATH and isinstance(handler, dict) and handler.get("Proxy") == NODE_TARGET:
+        proxy = handler.get("Proxy") if isinstance(handler, dict) else None
+        if path == NODE_PATH and proxy in {target, previous_target}:
             continue
-        if path == "/" or path.startswith(NODE_PATH) or NODE_PATH.startswith(path):
+        if path == "/":
+            # Lite may own the root route on a shared Tailscale computer.
+            master_roots = {target.removesuffix(NODE_PATH)}
+            if previous_target:
+                master_roots.add(previous_target.removesuffix(NODE_PATH))
+            if isinstance(proxy, str) and proxy.rstrip("/") in master_roots:
+                raise DeploymentError("Tailscale Serve exposes the Master admin console at /.")
+            continue
+        if path.startswith(NODE_PATH) or NODE_PATH.startswith(path):
             raise DeploymentError(
                 f"Tailscale Serve already uses overlapping path {path!r} on HTTPS port 443. "
                 "Remove that mapping manually; Setuora will not overwrite it."
@@ -583,7 +696,7 @@ def _ensure_private_serve(executable: str, host: str) -> None:
     # Reapply our exact mapping in background mode so a prior foreground Serve
     # session cannot disappear when its terminal closes.
     serve = _run(
-        [executable, "serve", "--bg", "--https=443", f"--set-path={NODE_PATH}", NODE_TARGET],
+        [executable, "serve", "--bg", "--https=443", f"--set-path={NODE_PATH}", target],
         check=False,
     )
     if serve.returncode != 0:
@@ -594,7 +707,7 @@ def _ensure_private_serve(executable: str, host: str) -> None:
     configured = _tailscale_json(executable, "serve", "status", "--json")
     actual, public = _serve_handler(configured, host)
     node = actual.get(NODE_PATH) if isinstance(actual, dict) else None
-    if public or not isinstance(node, dict) or node.get("Proxy") != NODE_TARGET:
+    if public or not isinstance(node, dict) or node.get("Proxy") != target:
         raise DeploymentError("Tailscale Serve did not retain the private Setuora API route.")
 
 
@@ -619,7 +732,7 @@ def _disable_own_serve() -> None:
         return
     handlers, _ = _serve_handler(config, host)
     node = handlers.get(NODE_PATH) if isinstance(handlers, dict) else None
-    if isinstance(node, dict) and node.get("Proxy") == NODE_TARGET:
+    if isinstance(node, dict) and node.get("Proxy") in {_node_target(), _previous_node_target()}:
         _run([executable, "serve", "--https=443", f"--set-path={NODE_PATH}", "off"])
         config = _tailscale_json(executable, "serve", "status", "--json")
         handlers, _ = _serve_handler(config, host)
@@ -632,22 +745,41 @@ def _disable_own_serve() -> None:
 def _verify_private_api(address: str) -> None:
     if not re.fullmatch(r"https://[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.ts\.net", address):
         raise DeploymentError("Tailscale returned an invalid private HTTPS address.")
-    checks = (("/api/v1/node", 401), ("/", 404))
-    for path, expected in checks:
+    try:
+        with urllib.request.urlopen(address + "/api/v1/node", timeout=15) as response:  # noqa: S310  # nosec B310
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except (OSError, urllib.error.URLError) as exc:
+        raise TailscaleUnavailable(
+            f"Cannot reach private Master HTTPS address {address}: {exc}"
+        ) from exc
+    if status != 401:
+        raise DeploymentError(
+            f"Private HTTPS check for /api/v1/node returned {status}, expected 401. "
+            "Check the Tailscale Serve route and access policy."
+        )
+    try:
+        with urllib.request.urlopen(address + "/", timeout=15) as response:  # noqa: S310  # nosec B310
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except (OSError, urllib.error.URLError) as exc:
+        raise TailscaleUnavailable(
+            f"Cannot reach private Master HTTPS address {address}: {exc}"
+        ) from exc
+    if status == 200:
         try:
-            with urllib.request.urlopen(address + path, timeout=15) as response:  # noqa: S310  # nosec B310
-                status = response.status
-        except urllib.error.HTTPError as exc:
-            status = exc.code
-        except (OSError, urllib.error.URLError) as exc:
-            raise TailscaleUnavailable(
-                f"Cannot reach private Master HTTPS address {address}: {exc}"
-            ) from exc
-        if status != expected:
+            with urllib.request.urlopen(address + "/health", timeout=15) as response:  # noqa: S310  # nosec B310
+                health = json.load(response)
+        except (OSError, ValueError, urllib.error.URLError) as exc:
             raise DeploymentError(
-                f"Private HTTPS check for {path} returned {status}, expected {expected}. "
-                "Check the Tailscale Serve route and access policy."
-            )
+                "Private HTTPS root has no verified Lite health endpoint."
+            ) from exc
+        if health != {"status": "ok", "role": "lite"}:
+            raise DeploymentError("Private HTTPS root exposes a service other than Setuora Lite.")
+    elif status not in {404, 502, 503}:
+        raise DeploymentError("Private HTTPS root returned an unexpected response.")
 
 
 def _save_connection_address(address: str) -> None:
@@ -692,6 +824,7 @@ def _configure_private_api(*, install: bool = True) -> None:
         _wait_for_health()
     _ensure_private_serve(executable, host)
     _verify_private_api(address)
+    _write_env({"SETUORA_PREVIOUS_WEB_PORT": ""})
     _save_connection_address(address)
     _write_env({TAILSCALE_URL_SETTING: address})
     print(f"Private Master address for Lite connection details: {address}")
@@ -728,7 +861,7 @@ def _check_private_api_status() -> str:
             "Master is running locally, but the private Tailscale Serve route is unavailable."
         )
     node = handlers.get(NODE_PATH)
-    if not isinstance(node, dict) or node.get("Proxy") != NODE_TARGET:
+    if not isinstance(node, dict) or node.get("Proxy") != _node_target(_public_web_port()):
         raise DeploymentError(
             "Master is running locally, but the private Tailscale Serve route is unavailable."
         )
@@ -771,6 +904,7 @@ def setup(_args: argparse.Namespace) -> None:
         stop(_args)
     else:
         _release_setuora_port()
+    _select_available_web_port()
     try:
         _install_runtime()
         _ensure_task()
@@ -789,7 +923,7 @@ def setup(_args: argparse.Namespace) -> None:
     _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
     _configure_private_api()
     print("Setuora Master is healthy on Windows.")
-    print("Admin console: http://127.0.0.1:8000")
+    print(f"Admin console: {_local_url()}")
 
 
 def start(_args: argparse.Namespace) -> None:
@@ -800,18 +934,20 @@ def start(_args: argparse.Namespace) -> None:
         raise DeploymentError(
             "The Setuora background task is missing. Choose Setup / repair first."
         )
+    _disable_own_serve()
     _task("/End", "/TN", TASK_NAME, check=False)
     try:
         _wait_for_stop(timeout_seconds=3)
     except DeploymentError:
         _release_setuora_port()
+    _select_available_web_port()
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     try:
         _configure_private_api(install=False)
     except TailscaleUnavailable as exc:
         print(f"Private Lite API is offline: {exc}")
-    print("Setuora Master is running at http://127.0.0.1:8000.")
+    print(f"Setuora Master is running at {_local_url()}.")
 
 
 def stop(_args: argparse.Namespace) -> None:
@@ -830,9 +966,9 @@ def status(_args: argparse.Namespace) -> None:
     task = _task("/Query", "/TN", TASK_NAME, "/FO", "LIST", check=False, capture=True)
     if task.returncode == 0 and task.stdout.strip():
         print(task.stdout.strip())
-    url = "http://127.0.0.1:8000/health"
+    url = _local_url(_public_web_port()) + "/health"
     try:
-        with urllib.request.urlopen(url, timeout=3) as response:  # nosec B310
+        with urllib.request.urlopen(url, timeout=3) as response:  # noqa: S310  # nosec B310
             payload = json.load(response)
     except (OSError, ValueError, urllib.error.URLError) as exc:
         raise DeploymentError(
@@ -840,9 +976,11 @@ def status(_args: argparse.Namespace) -> None:
             "If Start fails, choose View recent logs."
         ) from exc
     if payload != {"status": "ok", "role": "master"}:
-        raise DeploymentError("Port 8000 is being used by a different application.")
+        raise DeploymentError(
+            f"Port {_public_web_port()} is being used by a different application."
+        )
     print("Setuora Master is running and its database is responding.")
-    print("Open http://127.0.0.1:8000 in your browser.")
+    print(f"Open {_local_url(_public_web_port())} in your browser.")
     address = _check_private_api_status()
     print(f"Private Lite API is responding at {address}/api/v1/.")
 
@@ -891,6 +1029,25 @@ def update(_args: argparse.Namespace) -> None:
     )
 
 
+def run_server(_args: argparse.Namespace) -> None:
+    """Start the scheduled server with the port selected during setup."""
+    port = _web_port()
+    command = [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--workers",
+        "1",
+        "--no-access-log",
+    ]
+    raise SystemExit(_run(command, check=False).returncode)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Deploy Setuora Master natively on Windows.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -901,6 +1058,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("stop", stop, "stop Setuora while preserving data"),
         ("status", status, "show the Windows scheduled task state"),
         ("update", update, "update dependencies and restart"),
+        ("run-server", run_server, "run the scheduled local web server"),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.set_defaults(function=function)

@@ -4,13 +4,15 @@ The `.cmd` file is a self-extracting Windows installer and updater. Run it on
 the Windows server. It requests Administrator access and installs Setuora under
 `C:\ProgramData\Setuora\Setuora-Master-windows`.
 
-Requirements are Windows Server 2019+ (or Windows 10/11 Pro for a pilot),
-Python 3.11+, Internet access during the initial dependency installation, and
+Requirements are x64 Windows 10 or 11 (Windows 10 needs active security updates or a supported LTSC lifecycle),
+Internet access during the initial dependency installation, and
 network access to the central Tally HTTP/XML gateway.
 
 Setup creates a Python virtual environment, registers Setuora as a startup
 task, starts it, and verifies the local health endpoint. It does not expose a
 public service or install Docker.
+Setup selects an unused local port if 8000 is occupied and saves that port for
+later starts and updates. Master and Lite can share a computer.
 
 Setup installs or finds Tailscale and configures private HTTPS access to only
 `/api/v1/`. Complete the Tailscale browser login when prompted, and sign Lite
@@ -29,8 +31,9 @@ inventory baseline once, and starts synchronization. Tally runs only at Master.
 
 Double-click
 `C:\ProgramData\Setuora\Setuora-Master-windows\setuora.bat` for the controls
-menu: browser, start/stop, status, setup/repair, update, logs, and configuration
-checks. Closing the menu leaves Setuora running. Actions requiring
+menu: browser, start/stop, status, setup/repair, update, logs, configuration
+checks, and removal with a final recovery backup. The browser action uses the
+saved local port. Closing the menu leaves Setuora running. Actions requiring
 Administrator access open a visible console after Windows approval.
 
 Choose **Install downloaded update** and select a newer Master `.cmd`

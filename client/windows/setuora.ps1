@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("menu", "setup", "preflight", "start", "stop", "status", "open", "logs", "update", "update-runtime", "help", "sftp-install", "sftp-add")]
+    [ValidateSet("menu", "setup", "preflight", "start", "stop", "status", "open", "logs", "update", "update-runtime", "uninstall", "help", "sftp-install", "sftp-add")]
     [string]$Command = "menu",
     [switch]$Elevated,
     [switch]$PauseAfter,
@@ -16,7 +16,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot "deploy.py"))) {
 }
 $ControllerPath = $PSCommandPath
 $ProductName = "Setuora Master"
-$BrowserUrl = "http://127.0.0.1:8000"
+$portFile = Join-Path $ApplicationRoot 'runtime-port.txt'
+$browserPort = '8000'
+if (Test-Path -LiteralPath $portFile) {
+    $candidate = (Get-Content -LiteralPath $portFile -TotalCount 1).Trim()
+    if ($candidate -notmatch '^[0-9]{4,5}$' -or [int]$candidate -lt 1024 -or [int]$candidate -gt 65535) {
+        throw "The local browser port file is invalid. Run Setup / repair."
+    }
+    $browserPort = $candidate
+}
+$BrowserUrl = "http://127.0.0.1:$browserPort"
 Set-Location -LiteralPath $ApplicationRoot
 
 function Test-SetuoraAdministrator {
@@ -215,14 +224,14 @@ function Install-SetuoraUpdate {
 function Show-SetuoraHelp {
     Write-Host "$ProductName controls"
     Write-Host "Double-click setuora.bat to open the menu."
-    Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, help"
-    Write-Host "Setup, Start, Stop, Logs, Check configuration and Update request Administrator access."
+    Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, uninstall, help"
+    Write-Host "Setup, Start, Stop, Logs, Check configuration, Update and Uninstall request Administrator access."
     Write-Host "Source updates use Git. Installed copies ask you to choose a downloaded installer."
     Write-Host "Browser: $BrowserUrl"
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
-    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "logs", "sftp-install", "sftp-add")) {
+    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs", "sftp-install", "sftp-add")) {
         if (-not (Test-SetuoraAdministrator)) { return Invoke-SetuoraElevated $Action $ExtraArguments }
     }
     switch ($Action) {
@@ -238,6 +247,14 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             return Install-SetuoraUpdate
         }
         "update-runtime" { return Invoke-SetuoraDeployment "update" }
+        "uninstall" {
+            # The deferred cleanup waits for this controller to exit and cannot
+            # remove a directory that remains the controller's working directory.
+            Set-Location -LiteralPath (Join-Path $env:ProgramData 'Setuora')
+            $code = Invoke-SetuoraNative "powershell.exe" @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $ApplicationRoot "scripts\windows\uninstall.ps1"), "-Product", "Master")
+            if ($code -eq 0) { $script:UninstallSucceeded = $true }
+            return $code
+        }
         "sftp-install" {
             return Invoke-SetuoraNative "powershell.exe" @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $ApplicationRoot "scripts\windows\configure-sftp.ps1"), "-Action", "Install")
         }
@@ -268,21 +285,23 @@ function Show-SetuoraMenu {
         }
         Write-Host "  [7] View recent logs"
         Write-Host "  [8] Check configuration"
+        Write-Host "  [9] Remove this installation (keep recovery backup)"
         Write-Host "  [0] Exit"
         Write-Host ""
         Write-Host "  Closing this menu leaves Setuora running."
-        $selection = Read-Host "Choose an option (0-8)"
+        $selection = Read-Host "Choose an option (0-9)"
         $action = switch ($selection) {
             "1" { "open" }; "2" { "start" }; "3" { "stop" }; "4" { "status" }
-            "5" { "setup" }; "6" { "update" }; "7" { "logs" }; "8" { "preflight" }
+            "5" { "setup" }; "6" { "update" }; "7" { "logs" }; "8" { "preflight" }; "9" { "uninstall" }
             "0" { return 0 }
             default { "" }
         }
         if (-not $action) {
-            Write-Host "Choose a number from 0 to 8." -ForegroundColor Yellow
+            Write-Host "Choose a number from 0 to 9." -ForegroundColor Yellow
         } else {
             try {
                 $code = Invoke-SetuoraCommand $action
+                if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }
                 if ($code -ne 0) { Write-Host "The action did not complete (exit $code). Review the message above; use View recent logs for server errors." -ForegroundColor Yellow }
             } catch {
                 Write-Host $_.Exception.Message -ForegroundColor Red
@@ -304,5 +323,5 @@ try {
     Write-Host $_.Exception.Message -ForegroundColor Red
     $exitCode = 1
 }
-if ($PauseAfter) { $null = Read-Host "Press Enter to close this Administrator window" }
+if ($PauseAfter -and -not $script:UninstallSucceeded) { $null = Read-Host "Press Enter to close this Administrator window" }
 exit $exitCode

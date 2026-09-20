@@ -39,6 +39,7 @@ def test_deployment_helper_rewrites_settings_without_exposing_secrets(tmp_path, 
         encoding="utf-8",
     )
     monkeypatch.setattr(deploy, "ENV_PATH", env_path)
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
 
     deploy._write_env(
         {
@@ -59,6 +60,7 @@ def test_deployment_helper_quotes_password_characters(tmp_path, monkeypatch):
     env_path = tmp_path / ".env"
     env_path.write_text("", encoding="utf-8")
     monkeypatch.setattr(deploy, "ENV_PATH", env_path)
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
 
     password = 'spaces # quotes " and slash \\ stay intact'
     deploy._write_env({"BOOTSTRAP_ADMIN_PASSWORD": password})
@@ -120,7 +122,7 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     assert "SETUORA_ELEVATED_LOG" not in launcher
     assert "RedirectStandardOutput" not in launcher
     assert "No action was completed" in launcher
-    assert "if ($PauseAfter)" in launcher
+    assert "if ($PauseAfter -and -not $script:UninstallSucceeded)" in launcher
     assert (
         '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime"'
         in launcher
@@ -135,11 +137,18 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
         "start",
         "stop",
         "update",
+        "uninstall",
         "help",
     ):
         assert f'"{action}"' in launcher
     assert "Show-SetuoraMenu" in launcher
     assert "Install downloaded update" in launcher
+    assert "[9] Remove this installation" in launcher
+    assert '"9" { "uninstall" }' in launcher
+    assert '"-Product", "Master"' in launcher
+    assert "if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }" in launcher
+    assert "Set-Location -LiteralPath (Join-Path $env:ProgramData 'Setuora')" in launcher
+    assert "if ($PauseAfter -and -not $script:UninstallSucceeded)" in launcher
     assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
     assert finder.index("..\\.venv\\Scripts\\python.exe") < finder.index("py -3.11")
     for script_name, action in (
@@ -160,35 +169,40 @@ def test_one_file_master_bootstrap_updates_safely_and_preserves_packaged_install
         encoding="utf-8"
     )
 
-    assert "raw.githubusercontent.com/Setuora/Setuora-Master/main/scripts/windows/bootstrap.ps1" in batch
+    assert (
+        "raw.githubusercontent.com/Setuora/Setuora-Master/main/scripts/windows/bootstrap.ps1"
+        in batch
+    )
     assert "scripts\\windows\\bootstrap.ps1" in batch
     assert "goto elevated_exit" in batch
     assert "endlocal & exit /b %ERRORLEVEL%" in batch.split(":elevated_exit", 1)[1]
     assert "Setuora-Master-windows" in bootstrap
     assert 'if exist "%ProgramData%\\Setuora\\Setuora-Master\\.git"' in package_header
-    assert "schtasks.exe /Query /TN Setuora-Lite" in package_header
+    assert "schtasks.exe /Query /TN Setuora-Lite" not in package_header
     assert "schtasks.exe /Query /TN Setuora-Master" in package_header
     assert 'icacls.exe "%ProgramData%\\Setuora"' in package_header
     assert package_header.index("Setuora-Master\\.git") < package_header.index("Expand-Archive")
-    assert "Setuora-Lite" in bootstrap
+    assert "Setuora-Lite" not in bootstrap
     assert "Setuora-Master'" in bootstrap
     assert "Git.Git" in bootstrap
     assert "Get-AuthenticodeSignature" in bootstrap
     assert "Johannes Schindelin|Git for Windows" in bootstrap
     assert "*S-1-5-32-545:${inheritance}RX" in bootstrap
-    assert bootstrap.index("Set-CodeAcl $ProductRoot") < bootstrap.index("'clone', '--single-branch'")
-    assert bootstrap.index("Protect-Checkout", bootstrap.index("'clone', '--single-branch'")) < bootstrap.index(
-        "Invoke-Controller 'setup'"
+    assert bootstrap.index("Set-CodeAcl $ProductRoot") < bootstrap.index(
+        "'clone', '--single-branch'"
     )
+    assert bootstrap.index(
+        "Protect-Checkout", bootstrap.index("'clone', '--single-branch'")
+    ) < bootstrap.index("Invoke-Controller 'setup'")
     assert "Get-ChildItem -LiteralPath $InstallRoot -Force" in bootstrap
     assert "$child.Name -in @('.env', 'data', 'logs')" in bootstrap
     assert "Set-CodeAcl $child.FullName -Recursive" in bootstrap
     assert "--porcelain" in bootstrap
     assert "--is-ancestor" in bootstrap
     assert "--ff-only" in bootstrap
-    assert bootstrap.index("Backup-Master", bootstrap.index("$current -ne $latest")) < bootstrap.index(
-        "Invoke-Controller 'stop'"
-    )
+    assert bootstrap.index(
+        "Backup-Master", bootstrap.index("$current -ne $latest")
+    ) < bootstrap.index("Invoke-Controller 'stop'")
     assert bootstrap.index("Invoke-Controller 'stop'") < bootstrap.index("'merge', '--ff-only'")
 
 
@@ -329,6 +343,7 @@ def test_failed_setup_repair_attempts_to_restart_existing_master(monkeypatch):
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
     monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
     monkeypatch.setattr(
         deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
     )
@@ -349,6 +364,8 @@ def test_failed_setup_repair_attempts_to_restart_existing_master(monkeypatch):
 def test_repair_preserves_existing_database_and_host_configuration(tmp_path, monkeypatch):
     monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(deploy, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(deploy, "PORT_PATH", tmp_path / "runtime-port.txt")
+    monkeypatch.setattr(deploy, "_run", lambda *args, **kwargs: None)
     monkeypatch.setenv("COMPUTERNAME", "warehouse-pc")
     values = _valid_environment()
     values.update(
@@ -378,12 +395,17 @@ def test_repair_preserves_existing_database_and_host_configuration(tmp_path, mon
     assert deploy._has_application_data()
 
 
-def test_preflight_rejects_wrong_port_and_nonpersistent_database():
+def test_preflight_rejects_invalid_port_and_nonpersistent_database():
     values = _valid_environment()
-    values.update({"SETUORA_WEB_PORT": "9000", "DATABASE_URL": "sqlite:///:memory:"})
+    values.update({"SETUORA_WEB_PORT": "70000", "DATABASE_URL": "sqlite:///:memory:"})
     issues = deploy._environment_issues(values, has_application_data=False)
-    assert "SETUORA_WEB_PORT must remain 8000 for the Windows service." in issues
+    assert "SETUORA_WEB_PORT must be between 1024 and 65535." in issues
     assert "DATABASE_URL must point to a persistent SQLite database for backups." in issues
+    values["SETUORA_WEB_PORT"] = "8001"
+    assert not any(
+        "SETUORA_WEB_PORT" in issue
+        for issue in deploy._environment_issues(values, has_application_data=False)
+    )
 
 
 def test_stop_waits_until_web_process_releases_port(monkeypatch):
@@ -400,6 +422,7 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
         return next(attempts)
 
     monkeypatch.setattr(deploy, "_port_listeners", listeners)
+    monkeypatch.setattr(deploy, "_is_own_listener", lambda _: True)
     monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
     deploy.stop(argparse.Namespace())
     assert events == ["task-end", "check-port", "check-port"]
@@ -410,29 +433,23 @@ def test_no_listener_is_free_even_when_loopback_connections_time_out(monkeypatch
     deploy._wait_for_stop(timeout_seconds=1)
 
 
-def test_stop_does_not_report_success_when_process_keeps_running(monkeypatch):
+def test_stop_leaves_unrelated_port_listener_running(monkeypatch):
     import argparse
-
-    import pytest
 
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_disable_own_serve", lambda: None)
     monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: None)
-    times = iter([0, 31])
-    monkeypatch.setattr(deploy.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(
         deploy,
         "_port_listeners",
         lambda: [{"Pid": 88, "ExecutablePath": "C:\\Other\\python.exe", "CommandLine": "other"}],
     )
-    with pytest.raises(deploy.DeploymentError, match="belongs to another process"):
-        deploy.stop(argparse.Namespace())
+    deploy.stop(argparse.Namespace())
 
 
 def test_port_recovery_only_terminates_exact_master_venv_process(tmp_path, monkeypatch):
-    import pytest
-
     monkeypatch.setattr(deploy, "VENV_PATH", tmp_path / ".venv")
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], {"SETUORA_WEB_PORT": "8000"}))
     expected = str(deploy._venv_python().resolve())
     owned = {
         "Pid": 123,
@@ -442,6 +459,7 @@ def test_port_recovery_only_terminates_exact_master_venv_process(tmp_path, monke
     assert deploy._is_own_listener(owned)
     assert not deploy._is_own_listener({**owned, "ExecutablePath": str(tmp_path / "other.exe")})
     assert not deploy._is_own_listener({**owned, "CommandLine": "python -m http.server 8000"})
+    assert not deploy._is_own_listener({**owned, "CommandLine": owned["CommandLine"] + "0"})
 
     calls = []
     monkeypatch.setattr(deploy, "_run", lambda command, **kwargs: calls.append(command))
@@ -456,9 +474,78 @@ def test_port_recovery_only_terminates_exact_master_venv_process(tmp_path, monke
         "_port_listeners",
         lambda: [owned, {**owned, "Pid": 456, "ExecutablePath": "C:/Other/python.exe"}],
     )
-    with pytest.raises(deploy.DeploymentError, match="belongs to another process"):
-        deploy._release_setuora_port()
-    assert calls == []
+    deploy._release_setuora_port()
+    assert calls == [["taskkill.exe", "/PID", "123", "/F"], "released"]
+
+
+def test_setup_selects_and_persists_new_port_when_existing_port_is_busy(tmp_path, monkeypatch):
+    values = {"SETUORA_WEB_PORT": "8000"}
+    occupied = {8000}
+    monkeypatch.setattr(deploy, "PORT_PATH", tmp_path / "runtime-port.txt")
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], values.copy()))
+    monkeypatch.setattr(deploy, "_write_env", lambda updates: values.update(updates))
+    monkeypatch.setattr(
+        deploy, "_port_listeners", lambda port: [{"Pid": 42}] if port in occupied else []
+    )
+    monkeypatch.setattr(deploy, "_can_bind_port", lambda port: True)
+    monkeypatch.setattr(deploy, "_reserved_sibling_ports", lambda: set())
+
+    assert deploy._select_available_web_port() == 8001
+    assert values["SETUORA_WEB_PORT"] == "8001"
+    assert values["SETUORA_PREVIOUS_WEB_PORT"] == "8000"
+    assert deploy._public_web_port() == 8001
+    assert deploy._select_available_web_port() == 8001
+    occupied.add(8001)
+    assert deploy._select_available_web_port() == 8002
+    assert values["SETUORA_WEB_PORT"] == "8002"
+    assert values["SETUORA_PREVIOUS_WEB_PORT"] == "8001"
+    assert deploy._previous_node_target() == "http://127.0.0.1:8001/api/v1/"
+
+
+def test_master_reserves_lite_saved_ports_even_when_lite_is_stopped(tmp_path, monkeypatch):
+    import json
+
+    import pytest
+
+    lite = tmp_path / "Setuora" / "Setuora-Lite"
+    lite.mkdir(parents=True)
+    ports = lite / ".runtime-ports.json"
+    ports.write_text(json.dumps({"web_port": 8000, "caddy_port": 8080}), encoding="ascii")
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+    values = {"SETUORA_WEB_PORT": "8000"}
+    monkeypatch.setattr(deploy, "PORT_PATH", tmp_path / "runtime-port.txt")
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], values.copy()))
+    monkeypatch.setattr(deploy, "_write_env", lambda updates: values.update(updates))
+    monkeypatch.setattr(deploy, "_port_listeners", lambda port: [])
+    monkeypatch.setattr(deploy, "_can_bind_port", lambda port: True)
+
+    assert deploy._reserved_sibling_ports() == {8000, 8080}
+    assert deploy._select_available_web_port() == 8001
+    assert values["SETUORA_WEB_PORT"] == "8001"
+    ports.write_text('{"web_port": "8000", "caddy_port": 8080}', encoding="ascii")
+    with pytest.raises(deploy.DeploymentError, match="invalid web_port"):
+        deploy._reserved_sibling_ports()
+
+
+def test_scheduled_server_uses_saved_web_port(monkeypatch):
+    import argparse
+    import subprocess
+
+    commands = []
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], {"SETUORA_WEB_PORT": "8012"}))
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda command, **kwargs: (
+            commands.append(command) or subprocess.CompletedProcess(command, 0)
+        ),
+    )
+    import pytest
+
+    with pytest.raises(SystemExit) as result:
+        deploy.run_server(argparse.Namespace())
+    assert result.value.code == 0
+    assert commands[0][-5:] == ["--port", "8012", "--workers", "1", "--no-access-log"]
 
 
 def test_private_serve_refuses_funnel_and_overlapping_routes(monkeypatch):
@@ -466,6 +553,7 @@ def test_private_serve_refuses_funnel_and_overlapping_routes(monkeypatch):
 
     host = "master.example.ts.net"
     calls = []
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], {"SETUORA_WEB_PORT": "8000"}))
     monkeypatch.setattr(deploy, "_run", lambda command, **kwargs: calls.append(command))
 
     config = {"AllowFunnel": {f"{host}:443": True}}
@@ -474,8 +562,13 @@ def test_private_serve_refuses_funnel_and_overlapping_routes(monkeypatch):
         deploy._ensure_private_serve("tailscale.exe", host)
     assert calls == []
 
-    config = {"Web": {f"{host}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:9000"}}}}}
+    config = {"Web": {f"{host}:443": {"Handlers": {"/api/": {"Proxy": "http://127.0.0.1:9000"}}}}}
     with pytest.raises(deploy.DeploymentError, match="overlapping path"):
+        deploy._ensure_private_serve("tailscale.exe", host)
+    assert calls == []
+
+    config = {"Web": {f"{host}:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8000"}}}}}
+    with pytest.raises(deploy.DeploymentError, match="exposes the Master admin console"):
         deploy._ensure_private_serve("tailscale.exe", host)
     assert calls == []
 
@@ -484,13 +577,14 @@ def test_private_serve_adds_only_node_api_and_checks_persisted_route(monkeypatch
     import subprocess
 
     host = "master.example.ts.net"
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], {"SETUORA_WEB_PORT": "8000"}))
     before = {"Web": {f"{host}:443": {"Handlers": {"/other": {"Proxy": "http://127.0.0.1:9000"}}}}}
     after = {
         "Web": {
             f"{host}:443": {
                 "Handlers": {
                     "/other": {"Proxy": "http://127.0.0.1:9000"},
-                    deploy.NODE_PATH: {"Proxy": deploy.NODE_TARGET},
+                    deploy.NODE_PATH: {"Proxy": deploy._node_target()},
                 }
             }
         }
@@ -516,6 +610,43 @@ def test_private_serve_adds_only_node_api_and_checks_persisted_route(monkeypatch
     ]
 
 
+def test_private_serve_preserves_lite_root_and_moves_master_api_port(monkeypatch):
+    import subprocess
+
+    host = "shared.example.ts.net"
+    lite = {"Proxy": "http://127.0.0.1:8080"}
+    values = {"SETUORA_WEB_PORT": "8001", "SETUORA_PREVIOUS_WEB_PORT": "8000"}
+    monkeypatch.setattr(deploy, "_read_env", lambda: ([], values))
+    before = {
+        "Web": {
+            f"{host}:443": {
+                "Handlers": {"/": lite, deploy.NODE_PATH: {"Proxy": deploy._node_target(8000)}}
+            }
+        }
+    }
+    after = {
+        "Web": {
+            f"{host}:443": {
+                "Handlers": {"/": lite, deploy.NODE_PATH: {"Proxy": deploy._node_target(8001)}}
+            }
+        }
+    }
+    states = iter([before, after])
+    commands = []
+    monkeypatch.setattr(deploy, "_tailscale_json", lambda *args: next(states))
+    monkeypatch.setattr(
+        deploy,
+        "_run",
+        lambda command, **kwargs: (
+            commands.append(command) or subprocess.CompletedProcess(command, 0)
+        ),
+    )
+
+    deploy._ensure_private_serve("tailscale.exe", host)
+    assert commands[0][-1] == "http://127.0.0.1:8001/api/v1/"
+    assert after["Web"][f"{host}:443"]["Handlers"]["/"] == lite
+
+
 def test_private_api_probe_requires_auth_and_blocks_console(monkeypatch):
     import urllib.error
 
@@ -532,6 +663,43 @@ def test_private_api_probe_requires_auth_and_blocks_console(monkeypatch):
     statuses = iter([200])
     with pytest.raises(deploy.DeploymentError, match="expected 401"):
         deploy._verify_private_api("https://master.example.ts.net")
+
+
+def test_private_api_probe_allows_lite_root_but_rejects_master_console(monkeypatch):
+    import urllib.error
+
+    import pytest
+
+    class Page:
+        status = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, _limit=None):
+            return self.body
+
+    health = {"value": b'{"status":"ok","role":"lite"}'}
+
+    def fetch(url, timeout):
+        if url.endswith("/api/v1/node"):
+            raise urllib.error.HTTPError(url, 401, "authentication required", {}, None)
+        if url.endswith("/health"):
+            return Page(health["value"])
+        # Lite's own login page may mention Setuora Master in normal copy.
+        return Page(b"Synchronize with Setuora Master")
+
+    monkeypatch.setattr(deploy.urllib.request, "urlopen", fetch)
+    deploy._verify_private_api("https://shared.example.ts.net")
+    health["value"] = b'{"status":"ok","role":"master"}'
+    with pytest.raises(deploy.DeploymentError, match="other than Setuora Lite"):
+        deploy._verify_private_api("https://shared.example.ts.net")
 
 
 def test_existing_tailscale_session_sets_unattended_without_redoing_up(monkeypatch):
@@ -578,7 +746,7 @@ def test_stop_removes_only_its_private_serve_mapping(monkeypatch):
         "Web": {
             f"{host}:443": {
                 "Handlers": {
-                    deploy.NODE_PATH: {"Proxy": deploy.NODE_TARGET},
+                    deploy.NODE_PATH: {"Proxy": deploy._node_target(8000)},
                     "/other": {"Proxy": "http://127.0.0.1:9000"},
                 }
             }
@@ -630,6 +798,7 @@ def test_offline_tailscale_does_not_block_local_stop_or_start(monkeypatch, capsy
     )
     monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: None)
     monkeypatch.setattr(deploy, "_wait_for_health", lambda **kwargs: None)
+    monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
     monkeypatch.setattr(
         deploy,
         "_configure_private_api",
@@ -705,6 +874,8 @@ def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
         deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
     )
     monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+    monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
+    monkeypatch.setattr(deploy, "_local_url", lambda: "http://127.0.0.1:8000")
     monkeypatch.setattr(deploy, "_install_runtime", lambda: events.append("install"))
     monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
     monkeypatch.setattr(deploy, "_wait_for_health", lambda: events.append("healthy"))

@@ -16,12 +16,6 @@ if exist "%ProgramData%\Setuora\Setuora-Master\.git" (
   pause
   exit /b 1
 )
-schtasks.exe /Query /TN Setuora-Lite >nul 2>&1
-if not errorlevel 1 (
-  echo Setuora Lite already runs on this computer. Master and Lite need separate computers.
-  pause
-  exit /b 1
-)
 if not exist "%ProgramData%\Setuora\Setuora-Master-windows\.env" (
   schtasks.exe /Query /TN Setuora-Master >nul 2>&1
   if not errorlevel 1 (
@@ -50,7 +44,7 @@ echo.
 if "%SETUORA_EXIT%"=="0" (
   echo Setuora Master completed successfully.
   echo Open "%ProgramData%\Setuora\Setuora-Master-windows\setuora.bat" for the control menu.
-  echo Browser: http://127.0.0.1:8000
+  echo Browser: Open the installed setuora.bat and choose Open in browser.
 ) else (
   echo Setuora Master did not complete. Review the message above.
 )

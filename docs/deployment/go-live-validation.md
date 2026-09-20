@@ -7,17 +7,17 @@ each franchise is not the deployment procedure for these builds.
 
 ## Installation layout
 
-- Install Master once on the central server. Use its local admin console at
-  `http://127.0.0.1:8000`. Keep its database on a local persistent disk.
+- Install Master once on the central server. Open its local admin console from
+  `setuora.bat`; setup prints and saves the selected port. Keep its database on a local persistent disk.
 - Install one Lite server for each independent warehouse/franchise. Staff PCs
   in that warehouse open the same Lite server in a browser, using separate user
   accounts. They do not need independent databases or Tally installations.
 - A genuinely independent Lite installation needs its own permanent franchise
   code and credential. Do not clone a configured Lite database onto another
   simultaneously active machine, or share an SQLite file over a network drive.
-- Master and Lite both use port 8000 in the packaged Windows deployment. Run
-  them on separate machines/VMs; the packages do not support installing both
-  services on the same host with their default settings.
+- Master and Lite may share a Windows computer. Setup saves separate available
+  loopback ports for the services. Verify each app through its own `setuora.bat`
+  menu and check both private Tailscale routes.
 - Use the packaged single application process. Tally import serialization is
   in-process; do not add extra Uvicorn workers or a second Master process against
   the same company/database.
@@ -39,7 +39,7 @@ each franchise is not the deployment procedure for these builds.
    hostname or IP in `TRUSTED_HOSTS`. Test from a staff PC, not just the server.
    The default firewall rule applies to the Private profile. A domain-managed
    warehouse needs its administrator to provide the appropriate scoped Domain
-   firewall rule. Never forward Lite port 8000 or Tally port 9000 publicly.
+   firewall rule. Never forward Lite's local web port or Tally port 9000 publicly.
 5. Complete Tailscale setup on Master and Lite in the same tailnet. Setup
    publishes only Master's `/api/v1/` endpoints through private HTTPS Serve.
    Verify from a Lite machine that `/api/v1/node` returns 401 without a

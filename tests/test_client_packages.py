@@ -33,8 +33,8 @@ def test_package_builder_creates_safe_complete_windows_installer(tmp_path):
     assert not (tmp_path / f"Setuora-Master-{version}-linux.run").exists()
 
     windows_root = "Setuora-Master-windows"
-    windows_header, encoded_payload = windows_path.read_bytes().split(
-        b"\n__SETUORA_PAYLOAD_BELOW__\n", 1
+    windows_header, encoded_payload = (
+        windows_path.read_bytes().replace(b"\r\n", b"\n").split(b"\n__SETUORA_PAYLOAD_BELOW__\n", 1)
     )
     assert windows_header.startswith(b"@echo off")
     windows_payload = base64.b64decode(encoded_payload)
@@ -45,6 +45,8 @@ def test_package_builder_creates_safe_complete_windows_installer(tmp_path):
     assert f"{windows_root}/app/main.py" in members
     assert f"{windows_root}/scripts/windows/configure-sftp.ps1" in members
     assert f"{windows_root}/scripts/windows/run-server.cmd" in members
+    for recovery_file in ("uninstall.ps1", "finish-uninstall.ps1", "prepare-recovery.py"):
+        assert f"{windows_root}/scripts/windows/{recovery_file}" in members
     assert f"{windows_root}/compose.yaml" not in members
     assert f"{windows_root}/Dockerfile" not in members
 
@@ -75,6 +77,8 @@ def test_windows_installer_and_launcher_use_native_windows_services():
     assert '"sftp-install"' in launcher
     assert '"sftp-add"' in launcher
     assert "configure-sftp.ps1" in launcher
+    assert '"uninstall"' in launcher
+    assert '"-Product", "Master"' in launcher
     assert "docker" not in launcher.lower()
 
 
@@ -90,7 +94,7 @@ def test_installer_validates_payload_before_stopping_existing_service():
 
 def test_packaged_launcher_can_bootstrap_python_and_reuse_existing_runtime():
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
-    assert "Python.Python.3.11" in launcher
+    assert "Python.Python.3.13" in launcher
     assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
     assert '$Action -eq "setup"' in launcher
     assert "Install-SetuoraPython" in launcher

@@ -150,9 +150,6 @@ try {
     if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
         throw 'This release needs an x64 Windows 10 or 11 computer. The locked Python runtime does not support Windows ARM64 or 32-bit.'
     }
-    if (Test-Task 'Setuora-Lite') {
-        throw 'Setuora Lite already runs on this computer. Master and Lite both use port 8000; install them on separate computers.'
-    }
     if (Test-Path -LiteralPath (Join-Path $PackagedRoot '.env')) {
         throw "A packaged Master is already installed in $PackagedRoot. Update it with its release installer; this Git installer will not replace it."
     }
@@ -214,7 +211,9 @@ try {
     Invoke-Controller 'setup'
     Protect-Checkout
     Write-Host ''
-    Write-Host 'Setuora Master is ready at http://127.0.0.1:8000' -ForegroundColor Green
+    $portFile = Join-Path $InstallRoot 'runtime-port.txt'
+    $port = if (Test-Path -LiteralPath $portFile) { (Get-Content -LiteralPath $portFile -TotalCount 1).Trim() } else { '8000' }
+    Write-Host "Setuora Master is ready at http://127.0.0.1:$port" -ForegroundColor Green
     Write-Host "For later controls, open $(Join-Path $InstallRoot 'setuora.bat')."
     exit 0
 } catch {

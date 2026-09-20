@@ -1,7 +1,7 @@
 # Setuora Windows setup: client handoff
 
-Use one dedicated **x64 Windows 11** computer for Master and a different dedicated
-x64 Windows computer for each Lite location. Windows 10 requires active [Extended
+Use **x64 Windows 11** computers for Master and Lite. They may share one computer
+when appropriate; setup assigns separate local ports. Windows 10 requires active [Extended
 Security Updates](https://learn.microsoft.com/en-us/windows/whats-new/extended-security-updates)
 or a supported LTSC edition. Keep each computer powered on and
 connected to the internet. Have an Administrator account and access to the same
@@ -15,7 +15,7 @@ Setuora administrator password, and complete the Tailscale sign-in link if shown
 If Tailscale asks the network owner to approve the device, MagicDNS, or HTTPS,
 complete that approval and double-click the BAT again.
 
-On the Master computer, open **http://127.0.0.1:8000**. Set up the existing Tally
+On the Master computer, open `setuora.bat` and choose **Open in browser**. Set up the existing Tally
 company and gateway in Setuora, then add each franchise. Copy its connection
 details and share them privately with that franchise's Lite administrator.
 Tally itself is a separately licensed application and is not installed by the BAT.
@@ -39,6 +39,12 @@ Double-click the same product BAT on its own computer to get the latest
 `main` branch and repair setup. The BAT refuses local code changes or a different
 installation type; it does not erase the database. The installed `setuora.bat`
 provides daily controls and status.
+
+To remove either product, open that product's installed `setuora.bat` and choose
+**Remove this installation**. Each removal stops that product and keeps a final
+recovery bundle in `C:\ProgramData\Setuora\Recovery\Master` or
+`C:\ProgramData\Setuora\Recovery\Lite`. Keep the recovery folder until the
+data is no longer needed. A coinstalled product remains in place.
 
 SQLite databases and automatic backups are created locally. You chose local
 backups for now; copies on the same computer are lost if that computer or disk is

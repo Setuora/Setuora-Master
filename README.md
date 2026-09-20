@@ -29,6 +29,14 @@ The Windows application binds to `127.0.0.1:8000`. Setup installs or finds Tails
 
 ## Windows installation
 
+For a fresh x64 Windows 10 or 11 computer, give the client just [install-master.bat](install-master.bat). They should double-click it, approve the Administrator prompt, choose a first administrator password when asked, and complete the Tailscale browser sign-in. The batch file downloads the current bootstrap from the public Setuora GitHub repository, installs Git and Python if needed, fetches the latest `main` source into `C:\ProgramData\Setuora\Setuora-Master`, installs the locked runtime, creates a Windows boot task, initializes the SQLite database, enables automatic local backups, and verifies the local server and private API. Double-click the same file later to fetch a safe fast-forward update and repair setup. The computer needs internet access during installation and must stay powered on for the service and Tally connection.
+
+This Git installation uses its own folder. If the older packaged `Setuora-Master-windows` installation exists, use that installation's release updater instead of running this batch file. Master and Lite must run on separate computers because both use port 8000. The current locked runtime supports x64; Windows ARM64 and 32-bit are not supported. Windows 10 production hosts need active Extended Security Updates or a supported LTSC lifecycle.
+
+The client still completes the Tally company and gateway settings in the local console and adds each franchise. Tailscale sign-in and any tailnet HTTPS or MagicDNS approval require the account owner. The first administrator password is entered locally and never printed by setup. Automatic SQLite backups stay on this computer by default; a lost computer also loses those copies. An off-machine backup destination can be added in Settings later.
+
+### Packaged release installer
+
 Build and run the Windows installer as Administrator:
 
 ```powershell

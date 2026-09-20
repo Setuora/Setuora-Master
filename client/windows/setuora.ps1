@@ -44,6 +44,8 @@ function Get-SetuoraPython {
         @{ Name = "py"; Prefix = @("-3") },
         @{ Name = "python"; Prefix = @() },
         @{ Name = "python3"; Prefix = @() },
+        @{ Name = "$env:ProgramFiles\Python313\python.exe"; Prefix = @() },
+        @{ Name = "$env:ProgramFiles\Python312\python.exe"; Prefix = @() },
         @{ Name = "$env:ProgramFiles\Python311\python.exe"; Prefix = @() }
     )
     foreach ($launcher in $launchers) {
@@ -65,17 +67,46 @@ function Get-SetuoraPython {
 }
 
 function Install-SetuoraPython {
-    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
-    if (-not $winget) {
-        throw "Python 3.11 or newer is required. Install Python from python.org with 'Add Python to PATH' enabled, then choose Setup / repair again."
+    if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+        throw "An x64 Windows 10 or 11 computer is required by the current locked runtime."
     }
-    Write-Host "Installing Python 3.11. Keep this window open..." -ForegroundColor Cyan
-    $code = Invoke-SetuoraNative $winget.Source @(
-        "install", "--id", "Python.Python.3.11", "--exact", "--source", "winget",
-        "--scope", "machine", "--accept-package-agreements", "--accept-source-agreements",
-        "--disable-interactivity"
-    )
-    if ($code -ne 0) { throw "Python installation failed (exit $code). Install Python 3.11 from python.org, then retry Setup / repair." }
+    $winget = Get-Command "winget.exe" -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host "Installing Python through Windows Package Manager..." -ForegroundColor Cyan
+        $code = Invoke-SetuoraNative $winget.Source @(
+            "install", "--id", "Python.Python.3.13", "--exact", "--source", "winget",
+            "--scope", "machine", "--accept-package-agreements", "--accept-source-agreements",
+            "--disable-interactivity"
+        )
+        if ($code -eq 3010) { throw "Python installed. Restart Windows, then run Setup / repair again." }
+        if ($code -eq 0 -and (Get-SetuoraPython)) { return }
+        Write-Host "Windows Package Manager did not provide Python. Trying the signed python.org installer..." -ForegroundColor Yellow
+    }
+
+    # Keep this fallback on an actively supported Python release with Windows installers.
+    # The runtime accepts Python 3.11+ and the locked wheels support Python 3.13.
+    $architecture = "amd64"
+    $version = "3.13.15"
+    $url = "https://www.python.org/ftp/python/$version/python-$version-$architecture.exe"
+    $installer = Join-Path ([IO.Path]::GetTempPath()) ("setuora-python-" + [guid]::NewGuid().ToString("N") + ".exe")
+    try {
+        Write-Host "Downloading the signed Python installer from python.org..." -ForegroundColor Cyan
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+        $signature = Get-AuthenticodeSignature -LiteralPath $installer
+        if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+            $signature.SignerCertificate.Subject -notmatch "Python Software Foundation") {
+            throw "The downloaded Python installer does not have a valid Python Software Foundation signature."
+        }
+        $process = Start-Process -FilePath $installer -ArgumentList @(
+            "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0"
+        ) -Wait -PassThru -WindowStyle Hidden
+        if ($process.ExitCode -notin @(0, 3010)) { throw "Python installation failed (exit $($process.ExitCode))." }
+        if ($process.ExitCode -eq 3010) { throw "Python installed. Restart Windows, then run Setup / repair again." }
+    } finally {
+        Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-SetuoraPython)) { throw "Python installed but was not found. Restart Windows and run Setup / repair again." }
 }
 
 function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @()) {
@@ -120,6 +151,18 @@ function Read-SetuoraGit([string[]]$Arguments) {
     return ($output -join [Environment]::NewLine).Trim()
 }
 
+function Backup-SetuoraSource {
+    $python = Join-Path $ApplicationRoot '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $python)) {
+        throw 'The installed Python runtime is missing. Choose Setup / repair before updating.'
+    }
+    Write-Host 'Creating a verified SQLite backup before updating...' -ForegroundColor Cyan
+    $code = Invoke-SetuoraNative $python @(
+        '-c', 'from app.services.backup import create_scheduled_backup; print(create_scheduled_backup().path)'
+    )
+    if ($code -ne 0) { throw 'The pre-update database backup failed. Master was left running.' }
+}
+
 function Update-SetuoraSource {
     if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) { throw "Git for Windows is required to update this source checkout." }
     $code = Invoke-SetuoraDeployment "preflight"
@@ -134,6 +177,7 @@ function Update-SetuoraSource {
     $null = Read-SetuoraGit @("fetch", "--quiet", "origin")
     $null = Read-SetuoraGit @("rev-parse", "--verify", "refs/remotes/origin/$branch")
     $null = Read-SetuoraGit @("merge-base", "--is-ancestor", "HEAD", "origin/$branch")
+    Backup-SetuoraSource
     $code = Invoke-SetuoraDeployment "stop"
     if ($code -ne 0) { return $code }
     try {
@@ -172,13 +216,13 @@ function Show-SetuoraHelp {
     Write-Host "$ProductName controls"
     Write-Host "Double-click setuora.bat to open the menu."
     Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, help"
-    Write-Host "Setup, Start, Stop, Check configuration and Update request Administrator access."
+    Write-Host "Setup, Start, Stop, Logs, Check configuration and Update request Administrator access."
     Write-Host "Source updates use Git. Installed copies ask you to choose a downloaded installer."
     Write-Host "Browser: $BrowserUrl"
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
-    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "sftp-install", "sftp-add")) {
+    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "logs", "sftp-install", "sftp-add")) {
         if (-not (Test-SetuoraAdministrator)) { return Invoke-SetuoraElevated $Action $ExtraArguments }
     }
     switch ($Action) {

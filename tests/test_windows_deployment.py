@@ -125,6 +125,7 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
         '$Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime"'
         in launcher
     )
+    assert '"logs", "sftp-install"' in launcher
     for action in (
         "open",
         "status",
@@ -152,6 +153,64 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
         assert "endlocal & exit /b %EXIT_CODE%" in wrapper
 
 
+def test_one_file_master_bootstrap_updates_safely_and_preserves_packaged_install():
+    batch = (PROJECT_ROOT / "install-master.bat").read_text(encoding="utf-8")
+    bootstrap = (PROJECT_ROOT / "scripts/windows/bootstrap.ps1").read_text(encoding="utf-8")
+    package_header = (PROJECT_ROOT / "client/windows/self-extract-header.cmd").read_text(
+        encoding="utf-8"
+    )
+
+    assert "raw.githubusercontent.com/Setuora/Setuora-Master/main/scripts/windows/bootstrap.ps1" in batch
+    assert "scripts\\windows\\bootstrap.ps1" in batch
+    assert "goto elevated_exit" in batch
+    assert "endlocal & exit /b %ERRORLEVEL%" in batch.split(":elevated_exit", 1)[1]
+    assert "Setuora-Master-windows" in bootstrap
+    assert 'if exist "%ProgramData%\\Setuora\\Setuora-Master\\.git"' in package_header
+    assert "schtasks.exe /Query /TN Setuora-Lite" in package_header
+    assert "schtasks.exe /Query /TN Setuora-Master" in package_header
+    assert 'icacls.exe "%ProgramData%\\Setuora"' in package_header
+    assert package_header.index("Setuora-Master\\.git") < package_header.index("Expand-Archive")
+    assert "Setuora-Lite" in bootstrap
+    assert "Setuora-Master'" in bootstrap
+    assert "Git.Git" in bootstrap
+    assert "Get-AuthenticodeSignature" in bootstrap
+    assert "Johannes Schindelin|Git for Windows" in bootstrap
+    assert "*S-1-5-32-545:${inheritance}RX" in bootstrap
+    assert bootstrap.index("Set-CodeAcl $ProductRoot") < bootstrap.index("'clone', '--single-branch'")
+    assert bootstrap.index("Protect-Checkout", bootstrap.index("'clone', '--single-branch'")) < bootstrap.index(
+        "Invoke-Controller 'setup'"
+    )
+    assert "Get-ChildItem -LiteralPath $InstallRoot -Force" in bootstrap
+    assert "$child.Name -in @('.env', 'data', 'logs')" in bootstrap
+    assert "Set-CodeAcl $child.FullName -Recursive" in bootstrap
+    assert "--porcelain" in bootstrap
+    assert "--is-ancestor" in bootstrap
+    assert "--ff-only" in bootstrap
+    assert bootstrap.index("Backup-Master", bootstrap.index("$current -ne $latest")) < bootstrap.index(
+        "Invoke-Controller 'stop'"
+    )
+    assert bootstrap.index("Invoke-Controller 'stop'") < bootstrap.index("'merge', '--ff-only'")
+
+
+def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(deploy.sys, "platform", "win32")
+    monkeypatch.setattr(deploy, "_run", lambda command: calls.append(command))
+    deploy._secure_private_storage()
+
+    assert [command[1] for command in calls] == [str(tmp_path / "data"), str(tmp_path / "logs")]
+    for command in calls:
+        assert command[0] == "icacls.exe"
+        assert "/inheritance:r" in command
+        assert "/T" in command
+        assert "*S-1-5-18:(OI)(CI)F" in command
+        assert "*S-1-5-32-544:(OI)(CI)F" in command
+        assert "*S-1-1-0" in command
+        assert "*S-1-5-11" in command
+        assert "*S-1-5-32-545" in command
+
+
 def test_source_update_stops_before_mutating_application_files():
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
     update = launcher[
@@ -162,6 +221,7 @@ def test_source_update_stops_before_mutating_application_files():
     assert "--porcelain" in update and "--untracked-files=all" in update
     assert "--is-ancestor" in update
     assert update.index('"fetch"') < update.index('Invoke-SetuoraDeployment "stop"')
+    assert update.index("Backup-SetuoraSource") < update.index('Invoke-SetuoraDeployment "stop"')
     assert update.index('Invoke-SetuoraDeployment "stop"') < update.index('"merge", "--ff-only"')
     assert update.index('"merge", "--ff-only"') < update.index('Invoke-SetuoraDeployment "update"')
 

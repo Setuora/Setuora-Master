@@ -118,6 +118,10 @@ def _write_env(updates: dict[str, str]) -> None:
                 "icacls.exe",
                 str(ENV_PATH),
                 "/inheritance:r",
+                "/remove:g",
+                "*S-1-1-0",
+                "*S-1-5-11",
+                "*S-1-5-32-545",
                 "/grant:r",
                 "*S-1-5-18:F",
                 "*S-1-5-32-544:F",
@@ -223,6 +227,29 @@ def _prepare_environment() -> None:
     _write_env(updates)
     (PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
     (PROJECT_ROOT / "logs").mkdir(parents=True, exist_ok=True)
+    _secure_private_storage()
+
+
+def _secure_private_storage() -> None:
+    """Keep the local database, backups, and logs readable only by the service and admins."""
+    if sys.platform != "win32":
+        return
+    for directory in (PROJECT_ROOT / "data", PROJECT_ROOT / "logs"):
+        _run(
+            [
+                "icacls.exe",
+                str(directory),
+                "/inheritance:r",
+                "/remove:g",
+                "*S-1-1-0",
+                "*S-1-5-11",
+                "*S-1-5-32-545",
+                "/grant:r",
+                "*S-1-5-18:(OI)(CI)F",
+                "*S-1-5-32-544:(OI)(CI)F",
+                "/T",
+            ]
+        )
 
 
 def _venv_python() -> Path:

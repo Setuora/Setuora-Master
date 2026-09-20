@@ -60,12 +60,12 @@ function Read-Host([string]$Prompt) {
 switch ($Case) {
     'parse' { if ($definitions.Count -lt 10) { throw 'Expected all shared-controller function definitions' } }
     'dispatch' {
-        foreach ($action in @('setup', 'start', 'stop', 'preflight', 'update', 'update-runtime')) {
+        foreach ($action in @('setup', 'start', 'stop', 'preflight', 'update', 'update-runtime', 'logs')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 17 "$action forwards elevation exit code"
             Assert-Equal $script:Calls @("elevate:$action") "$action requests elevation without deploying locally"
         }
-        foreach ($action in @('status', 'logs')) {
+        foreach ($action in @('status')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 0 "$action succeeds without elevation"
             Assert-Equal $script:Calls @("deploy:$action") "$action remains read-only"
@@ -116,6 +116,7 @@ switch ($Case) {
     'source-update' {
         Set-Item Function:Update-SetuoraSource -Value $originalUpdate
         function Get-Command([string]$Name, $ErrorAction) { return [pscustomobject]@{ Source = 'git.exe' } }
+        function Backup-SetuoraSource { $script:Calls.Add('backup') }
         function Read-SetuoraGit([string[]]$Arguments) {
             $script:Calls.Add("git:$($Arguments[0])")
             if ($Arguments[0] -eq 'branch') { return 'main' }
@@ -124,7 +125,7 @@ switch ($Case) {
             return ''
         }
         Assert-Equal (Update-SetuoraSource) 0 'Clean source update succeeds'
-        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'deploy:stop', 'git:merge', 'deploy:update') 'Source update order'
+        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'backup', 'deploy:stop', 'git:merge', 'deploy:update') 'Source update order'
         $script:DirtySource = $true
         Reset-Calls
         $caught = $false

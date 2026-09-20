@@ -10,6 +10,40 @@ if not "%ERRORLEVEL%"=="0" (
 )
 echo Setuora Master - Windows install or update
 echo.
+if exist "%ProgramData%\Setuora\Setuora-Master\.git" (
+  echo A Git-based Setuora Master installation already exists. Use install-master.bat to update it.
+  echo This packaged installer will not replace its boot task or database.
+  pause
+  exit /b 1
+)
+schtasks.exe /Query /TN Setuora-Lite >nul 2>&1
+if not errorlevel 1 (
+  echo Setuora Lite already runs on this computer. Master and Lite need separate computers.
+  pause
+  exit /b 1
+)
+if not exist "%ProgramData%\Setuora\Setuora-Master-windows\.env" (
+  schtasks.exe /Query /TN Setuora-Master >nul 2>&1
+  if not errorlevel 1 (
+    echo A different Setuora Master boot task already exists. This installer will not replace it.
+    pause
+    exit /b 1
+  )
+)
+if not exist "%ProgramData%\Setuora" mkdir "%ProgramData%\Setuora"
+icacls.exe "%ProgramData%\Setuora" /inheritance:r /remove:g *S-1-1-0 *S-1-5-11 /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /Q >nul
+if errorlevel 1 (
+  echo Could not protect the Setuora install folder. Installation stopped.
+  pause
+  exit /b 1
+)
+if not exist "%ProgramData%\Setuora\Setuora-Master-windows" mkdir "%ProgramData%\Setuora\Setuora-Master-windows"
+icacls.exe "%ProgramData%\Setuora\Setuora-Master-windows" /inheritance:r /remove:g *S-1-1-0 *S-1-5-11 /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /Q >nul
+if errorlevel 1 (
+  echo Could not protect the Master application folder. Installation stopped.
+  pause
+  exit /b 1
+)
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference = 'Stop'; $self = $env:SETUORA_SELF; $lines = [IO.File]::ReadAllLines($self); $marker = [Array]::IndexOf($lines, '__SETUORA_PAYLOAD_BELOW__'); if ($marker -lt 0) { throw 'The Setuora installer payload is missing or damaged.' }; $parent = Join-Path $env:ProgramData 'Setuora'; $target = Join-Path $parent 'Setuora-Master-windows'; $launcher = Join-Path $target 'setuora.ps1'; $isUpdate = Test-Path (Join-Path $target '.env'); $stage = Join-Path ([IO.Path]::GetTempPath()) ('setuora-stage-' + [guid]::NewGuid().ToString('N')); [IO.Directory]::CreateDirectory($stage) | Out-Null; $zip = Join-Path $stage 'payload.zip'; try { $encoded = [string]::Concat($lines[($marker + 1)..($lines.Length - 1)]); [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($encoded)); Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force; $source = Join-Path $stage 'Setuora-Master-windows'; if (-not (Test-Path (Join-Path $source 'deploy.py'))) { throw 'The installer payload is incomplete.' }; if ($isUpdate) { & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $launcher preflight; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Host 'Existing installation found. Stopping Setuora before updating...'; & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $launcher stop; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }; [IO.Directory]::CreateDirectory($target) | Out-Null; Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force; $caches = @(Get-ChildItem -LiteralPath (Join-Path $target 'app') -Directory -Filter '__pycache__' -Recurse -Force); foreach ($cache in $caches) { Remove-Item -LiteralPath $cache.FullName -Recurse -Force } } finally { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }; Write-Host ('Application files installed in: ' + $target); if ($isUpdate) { & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $launcher preflight; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $launcher update-runtime; exit $LASTEXITCODE }; & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $launcher setup; exit $LASTEXITCODE }"
 set "SETUORA_EXIT=%ERRORLEVEL%"
 echo.

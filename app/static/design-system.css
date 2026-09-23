@@ -245,7 +245,7 @@ small {
 }
 .global-nav {
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-6);
+  gap: var(--space-4);
   min-height: 72px;
   padding: 12px max(var(--page-gutter), calc((100% - var(--content-width)) / 2));
   border-radius: 0;
@@ -288,12 +288,12 @@ small {
   min-width: 100%;
   flex-wrap: nowrap;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 2px;
 }
 .subnav a,
 .nav-menu > summary {
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: 8px 5px;
+  font-size: 12px;
   font-weight: 500;
   border: 0;
 }

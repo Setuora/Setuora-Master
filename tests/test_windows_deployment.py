@@ -108,7 +108,6 @@ def test_production_preflight_rejects_legacy_sftp_and_requires_loopback_console(
 def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     controller = (PROJECT_ROOT / "setuora.bat").read_text(encoding="utf-8")
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
-    finder = (PROJECT_ROOT / "scripts/find_python.bat").read_text(encoding="utf-8")
 
     assert 'set "ROOT_DIR=%~dp0"' in controller
     assert "%ROOT_DIR%setuora.ps1" in controller
@@ -150,32 +149,25 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     assert "Set-Location -LiteralPath (Join-Path $env:ProgramData 'Setuora')" in launcher
     assert "if ($PauseAfter -and -not $script:UninstallSucceeded)" in launcher
     assert "$ApplicationRoot\\.venv\\Scripts\\python.exe" in launcher
-    assert finder.index("..\\.venv\\Scripts\\python.exe") < finder.index("py -3.11")
-    for script_name, action in (
-        ("setup.bat", "setup"),
-        ("start_setuora.bat", "start"),
-        ("stop_setuora.bat", "stop"),
-        ("update.bat", "update"),
-    ):
-        wrapper = (PROJECT_ROOT / "scripts" / script_name).read_text(encoding="utf-8")
-        assert f'call "%~dp0..\\setuora.bat" {action} %*' in wrapper
-        assert "endlocal & exit /b %EXIT_CODE%" in wrapper
+    # Like the reference installer, setuora.bat is the only batch file.
+    assert sorted(
+        path.relative_to(PROJECT_ROOT).as_posix()
+        for path in PROJECT_ROOT.rglob("*.bat")
+        if not {"archive", "node_modules", ".venv"} & set(path.relative_to(PROJECT_ROOT).parts)
+    ) == ["setuora.bat"]
 
 
-def test_one_file_master_bootstrap_updates_safely_and_preserves_packaged_install():
-    batch = (PROJECT_ROOT / "install-master.bat").read_text(encoding="utf-8")
+def test_start_bootstrap_updates_safely_and_preserves_packaged_install():
+    launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
     bootstrap = (PROJECT_ROOT / "scripts/windows/bootstrap.ps1").read_text(encoding="utf-8")
     package_header = (PROJECT_ROOT / "client/windows/self-extract-header.cmd").read_text(
         encoding="utf-8"
     )
 
-    assert (
-        "raw.githubusercontent.com/Setuora/Setuora-Master/main/scripts/windows/bootstrap.ps1"
-        in batch
-    )
-    assert "scripts\\windows\\bootstrap.ps1" in batch
-    assert "goto elevated_exit" in batch
-    assert "endlocal & exit /b %ERRORLEVEL%" in batch.split(":elevated_exit", 1)[1]
+    start = launcher.split("function Invoke-SetuoraStart", 1)[1].split("\nfunction ", 1)[0]
+    assert 'Join-Path $ApplicationRoot "scripts\\windows\\bootstrap.ps1"' in start
+    assert '"$programData\\Setuora\\Setuora-Master"' in launcher
+    assert '"$programData\\Setuora\\Setuora-Master-windows"' in launcher
     assert "Setuora-Master-windows" in bootstrap
     assert 'if exist "%ProgramData%\\Setuora\\Setuora-Master\\.git"' in package_header
     assert "schtasks.exe /Query /TN Setuora-Lite" not in package_header

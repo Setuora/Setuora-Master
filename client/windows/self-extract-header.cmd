@@ -11,7 +11,7 @@ if not "%ERRORLEVEL%"=="0" (
 echo Setuora Master - Windows install or update
 echo.
 if exist "%ProgramData%\Setuora\Setuora-Master\.git" (
-  echo A Git-based Setuora Master installation already exists. Use install-master.bat to update it.
+  echo A Git-based Setuora Master installation already exists. Open its setuora.bat and choose Start to update it.
   echo This packaged installer will not replace its boot task or database.
   pause
   exit /b 1

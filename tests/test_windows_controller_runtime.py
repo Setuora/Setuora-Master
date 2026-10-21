@@ -27,7 +27,7 @@ def powershell():
 
 
 @pytest.mark.parametrize(
-    "case", ["parse", "dispatch", "elevation", "routing", "checkout-update", "menu"]
+    "case", ["parse", "dispatch", "elevation", "routing", "checkout-update", "source-folder", "menu"]
 )
 def test_windows_controller_runtime_with_isolated_effects(powershell, case):
     result = subprocess.run(  # noqa: S603

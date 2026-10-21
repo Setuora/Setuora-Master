@@ -9,25 +9,25 @@ Tailscale network ready.
 
 ## 1. Install Master first
 
-Give the central office [install-master.bat](../../install-master.bat).
-They double-click it, approve the Windows Administrator prompt, choose the first
+Give the central office this repository. They double-click `setuora.bat`, choose
+**Start**, approve the Windows Administrator prompt, choose the first
 Setuora administrator password, and complete the Tailscale sign-in link if shown.
 If Tailscale asks the network owner to approve the device, MagicDNS, or HTTPS,
-complete that approval and double-click the BAT again.
+complete that approval and choose **Start** again.
 
-On the Master computer, open `setuora.bat` and choose **Start**; it opens the browser. Set up the existing Tally
+Start opens the Master console in the browser. Set up the existing Tally
 company and gateway in Setuora, then add each franchise. Copy its connection
 details and share them privately with that franchise's Lite administrator.
-Tally itself is a separately licensed application and is not installed by the BAT.
+Tally itself is a separately licensed application and is not installed by Start.
 
 ## 2. Install Lite at each location
 
-Give that location [install-lite.bat](https://github.com/Setuora/Setuora-Lite/blob/main/install-lite.bat). They
-double-click it, approve the Administrator prompt, choose the first Setuora
-administrator password, and sign in to the **same Tailscale network**. Follow any
-approval link and rerun the BAT if setup asks.
+Give that location the [Setuora-Lite](https://github.com/Setuora/Setuora-Lite) repository. They
+double-click `setuora.bat`, choose **Start**, approve the Administrator prompt, choose the
+first Setuora administrator password, and sign in to the **same Tailscale network**.
+Follow any approval link and choose **Start** again if setup asks.
 
-The installer prints a private **https://...ts.net** Lite address. Staff computers
+Start prints a private **https://...ts.net** Lite address. Staff computers
 must join that Tailscale network and open this HTTPS address to use Lite, including
 the camera scanner. In Lite, open **Admin → Master connection**, paste the
 connection details copied from Master, and select **Connect to Master**. Confirm
@@ -35,13 +35,13 @@ that the first inventory baseline appears on Master before normal stock work.
 
 ## Later
 
-Double-click the same product BAT on its own computer to get the latest
-`main` branch and repair setup. The BAT refuses local code changes or a different
-installation type; it does not erase the database. The installed `setuora.bat`
-provides daily controls and status.
+Choose **Start** in either product's `setuora.bat` to get the latest `main`
+branch and repair setup. Start keeps local code changes and a different
+installation type untouched; it does not erase the database. **Stop** keeps the
+product stopped, even after a restart, until Start.
 
 To remove either product, open that product's installed `setuora.bat` and choose
-**Uninstall** on Master or **Remove this installation** on Lite. Each removal stops that product and keeps a final
+**Uninstall**. Each removal stops that product and keeps a final
 recovery bundle in `C:\ProgramData\Setuora\Recovery\Master` or
 `C:\ProgramData\Setuora\Recovery\Lite`. Keep the recovery folder until the
 data is no longer needed. A coinstalled product remains in place.

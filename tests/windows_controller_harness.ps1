@@ -18,6 +18,7 @@ $ProductName = 'Setuora test'
 $BrowserUrl = 'http://127.0.0.1:8000'
 $Command = 'menu'
 $Elevated = $false
+$script:InstalledRoot = $ApplicationRoot
 $script:Calls = New-Object System.Collections.Generic.List[string]
 $script:Admin = $false
 $script:IsSource = $false
@@ -38,6 +39,11 @@ function Reset-Calls { $script:Calls.Clear() }
 function Test-SetuoraAdministrator { return $script:Admin }
 function Test-Path([string]$LiteralPath) { return $script:IsSource }
 function Get-SetuoraBrowserUrl { return $BrowserUrl }
+function Get-SetuoraInstalledRoot { return $script:InstalledRoot }
+function Invoke-SetuoraInteractive([string]$Script, [string[]]$Arguments = @()) {
+    $script:Calls.Add("run:" + (Split-Path -Leaf $Script) + ":" + ($Arguments -join ' '))
+    return 0
+}
 function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @()) {
     $script:Calls.Add("deploy:$Action")
     if ($Action -eq 'stop' -and $script:FailStop) { return 5 }
@@ -199,6 +205,24 @@ switch ($Case) {
         Reset-Calls
         Update-SetuoraCheckout
         Assert-Equal $script:Calls ($checked + @('git:merge-base', 'git:merge')) 'A first install has nothing to back up or stop'
+    }
+    'source-folder' {
+        # Controls run from a downloaded folder manage the ProgramData installation.
+        $script:Admin = $true
+        $Elevated = $true
+        $script:InstalledRoot = $null
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'start') 0 'First Start installs'
+        Assert-Equal $script:Calls @('run:bootstrap.ps1:') 'First Start runs the bootstrap into ProgramData'
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'stop') 0 'Stop without an installation succeeds'
+        Assert-Equal $script:Calls @() 'Nothing is stopped when nothing is installed'
+        $script:InstalledRoot = Join-Path ([IO.Path]::GetTempPath()) 'Setuora-Master-installed'
+        foreach ($action in @('start', 'stop', 'uninstall')) {
+            Reset-Calls
+            Assert-Equal (Invoke-SetuoraCommand $action) 0 "$action reaches the installation"
+            Assert-Equal $script:Calls @("run:setuora.ps1:$action -Elevated") "$action runs the installed controls"
+        }
     }
     'menu' {
         function Invoke-SetuoraCommand([string]$Action) {

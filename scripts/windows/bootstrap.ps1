@@ -82,7 +82,7 @@ function Install-Git {
             & $winget.Source install --id Git.Git --exact --source winget --scope machine --accept-package-agreements --accept-source-agreements --disable-interactivity
             $code = $LASTEXITCODE
         } finally { $ErrorActionPreference = $oldPreference }
-        if ($code -eq 3010) { throw 'Git installed. Restart Windows, then double-click install-master.bat again.' }
+        if ($code -eq 3010) { throw 'Git installed. Restart Windows, then choose Start in setuora.bat again.' }
         if ($code -eq 0 -and (Find-Git)) { return }
         Write-Host 'Windows Package Manager did not provide Git. Trying the signed official installer.' -ForegroundColor Yellow
     }
@@ -108,11 +108,11 @@ function Install-Git {
             '/VERYSILENT', '/NORESTART', '/SP-', '/SUPPRESSMSGBOXES', '/o:PathOption=Cmd'
         ) -Wait -PassThru -WindowStyle Hidden
         if ($process.ExitCode -notin @(0, 3010)) { throw "Git installation failed (exit $($process.ExitCode))." }
-        if ($process.ExitCode -eq 3010) { throw 'Git installed. Restart Windows, then double-click install-master.bat again.' }
+        if ($process.ExitCode -eq 3010) { throw 'Git installed. Restart Windows, then choose Start in setuora.bat again.' }
     } finally {
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
     }
-    if (-not (Find-Git)) { throw 'Git installed but was not found. Restart Windows and double-click install-master.bat again.' }
+    if (-not (Find-Git)) { throw 'Git installed but was not found. Restart Windows and choose Start in setuora.bat again.' }
 }
 
 function Invoke-Git([string[]]$Arguments) {
@@ -156,12 +156,12 @@ function Test-Task([string]$Name) {
 }
 
 try {
-    if (-not (Test-Administrator)) { throw 'Run install-master.bat and approve its Administrator prompt.' }
+    if (-not (Test-Administrator)) { throw 'Choose Start in setuora.bat and approve its Administrator prompt.' }
     if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
         throw 'This release needs an x64 Windows 10 or 11 computer. The locked Python runtime does not support Windows ARM64 or 32-bit.'
     }
     if (Test-Path -LiteralPath (Join-Path $PackagedRoot '.env')) {
-        throw "A packaged Master is already installed in $PackagedRoot. Update it with its release installer; this Git installer will not replace it."
+        throw "A packaged Master is already installed in $PackagedRoot. Update it with its release installer; Start will not replace it with a Git installation."
     }
     New-Item -ItemType Directory -Path $ProductRoot -Force | Out-Null
     if ((Get-Item -LiteralPath $ProductRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {

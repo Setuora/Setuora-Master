@@ -17,8 +17,24 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot "deploy.py"))) {
 $ControllerPath = $PSCommandPath
 $ProductName = "Setuora Master"
 
+function Get-SetuoraInstalledRoot {
+    # Like the Vaultio controls, Start installs into ProgramData, and controls
+    # run from a downloaded or cloned folder manage that installation.
+    $programData = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
+    $roots = @("$programData\Setuora\Setuora-Master", "$programData\Setuora\Setuora-Master-windows")
+    $current = [IO.Path]::GetFullPath($ApplicationRoot).TrimEnd('\')
+    foreach ($root in $roots) {
+        if ($current -ieq [IO.Path]::GetFullPath($root).TrimEnd('\')) { return $ApplicationRoot }
+    }
+    foreach ($root in $roots) {
+        if (Test-Path -LiteralPath "$root\deploy.py") { return $root }
+    }
+    return $null
+}
+
 function Get-SetuoraBrowserUrl {
-    $portFile = Join-Path $ApplicationRoot 'runtime-port.txt'
+    $installed = Get-SetuoraInstalledRoot
+    $portFile = Join-Path $(if ($installed) { $installed } else { $ApplicationRoot }) 'runtime-port.txt'
     $browserPort = '8000'
     if (Test-Path -LiteralPath $portFile) {
         $candidate = (Get-Content -LiteralPath $portFile -TotalCount 1).Trim()
@@ -229,9 +245,29 @@ function Update-SetuoraCheckout {
     }
 }
 
+function Invoke-SetuoraInteractive([string]$Script, [string[]]$Arguments = @()) {
+    # Give the child this console itself so its prompts stay visible.
+    $argumentLine = '-NoLogo -NoProfile -ExecutionPolicy Bypass -File "' + $Script + '"'
+    foreach ($argument in $Arguments) { $argumentLine += ' ' + $argument }
+    $process = Start-Process -FilePath "powershell.exe" -ArgumentList $argumentLine -NoNewWindow -Wait -PassThru
+    return [int]$process.ExitCode
+}
+
+function Invoke-SetuoraInstalledControls([string]$Root, [string]$Action) {
+    $controller = Join-Path $Root "client\windows\setuora.ps1"
+    if (-not (Test-Path -LiteralPath $controller)) { $controller = Join-Path $Root "setuora.ps1" }
+    # This window is already elevated; the original window opens the browser.
+    return Invoke-SetuoraInteractive $controller @($Action, "-Elevated")
+}
+
 function Invoke-SetuoraStart {
-    # Start installs, repairs or updates this copy in place, then runs and
-    # verifies Master.
+    # Start installs, repairs or updates Master, then runs and verifies it.
+    $installed = Get-SetuoraInstalledRoot
+    if ($installed -ne $ApplicationRoot) {
+        if ($installed) { return Invoke-SetuoraInstalledControls $installed "start" }
+        # First installation: clone the official checkout into ProgramData and set it up.
+        return Invoke-SetuoraInteractive (Join-Path $ApplicationRoot "scripts\windows\bootstrap.ps1")
+    }
     if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { Update-SetuoraCheckout }
     return Invoke-SetuoraDeployment "setup"
 }
@@ -266,7 +302,7 @@ function Install-SetuoraUpdate {
 function Show-SetuoraHelp {
     Write-Host "$ProductName controls"
     Write-Host "Double-click setuora.bat to open the menu: Start, Stop, Uninstall."
-    Write-Host "Start installs, repairs or updates this copy, runs it and opens the browser."
+    Write-Host "Start installs Master in $env:ProgramData\Setuora, or repairs or updates it, runs it and opens the browser."
     Write-Host "Stop keeps Master stopped, even after Windows restarts, until you choose Start."
     Write-Host "Uninstall saves a verified recovery copy, then removes the application."
     Write-Host "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, help"
@@ -290,6 +326,12 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             if ($code -eq 0 -and -not $Elevated) { Open-SetuoraBrowser }
             return $code
         }
+        "stop" {
+            $installed = Get-SetuoraInstalledRoot
+            if ($installed -eq $ApplicationRoot) { return Invoke-SetuoraDeployment "stop" }
+            if (-not $installed) { Write-Host "$ProductName is not installed; nothing to stop."; return 0 }
+            return Invoke-SetuoraInstalledControls $installed "stop"
+        }
         "open" {
             $code = Invoke-SetuoraDeployment "status"
             if ($code -ne 0) { return $code }
@@ -302,6 +344,13 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
         }
         "update-runtime" { return Invoke-SetuoraDeployment "update" }
         "uninstall" {
+            $installed = Get-SetuoraInstalledRoot
+            if ($installed -ne $ApplicationRoot) {
+                if (-not $installed) { Write-Host "$ProductName is not installed; nothing to remove." }
+                $code = if ($installed) { Invoke-SetuoraInstalledControls $installed "uninstall" } else { 0 }
+                if ($code -eq 0) { $script:UninstallSucceeded = $true }
+                return $code
+            }
             # The deferred cleanup waits for this controller to exit and cannot
             # remove a directory that remains the controller's working directory.
             Set-Location -LiteralPath (Join-Path $env:ProgramData 'Setuora')

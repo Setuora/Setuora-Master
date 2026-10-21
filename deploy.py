@@ -469,15 +469,17 @@ def _reserved_sibling_ports() -> set[int]:
             values = json.loads(path.read_text(encoding="ascii"))
         except (OSError, UnicodeError, ValueError) as exc:
             raise DeploymentError(
-                f"Lite port file is invalid: {path}. Run Lite Setup / repair."
+                f"Lite port file is invalid: {path}. Choose Start in Lite's setuora.bat."
             ) from exc
         if not isinstance(values, dict):
-            raise DeploymentError(f"Lite port file is invalid: {path}. Run Lite Setup / repair.")
+            raise DeploymentError(
+                f"Lite port file is invalid: {path}. Choose Start in Lite's setuora.bat."
+            )
         for key in ("web_port", "caddy_port"):
             port = values.get(key)
             if type(port) is not int or not 1024 <= port <= 65535:
                 raise DeploymentError(
-                    f"Lite port file has an invalid {key}: {path}. Run Lite Setup / repair."
+                    f"Lite port file has an invalid {key}: {path}. Choose Start in Lite's setuora.bat."
                 )
             reserved.add(port)
     return reserved

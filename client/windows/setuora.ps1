@@ -16,16 +16,21 @@ if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot "deploy.py"))) {
 }
 $ControllerPath = $PSCommandPath
 $ProductName = "Setuora Master"
-$portFile = Join-Path $ApplicationRoot 'runtime-port.txt'
-$browserPort = '8000'
-if (Test-Path -LiteralPath $portFile) {
-    $candidate = (Get-Content -LiteralPath $portFile -TotalCount 1).Trim()
-    if ($candidate -notmatch '^[0-9]{4,5}$' -or [int]$candidate -lt 1024 -or [int]$candidate -gt 65535) {
-        throw "The local browser port file is invalid. Run Setup / repair."
+
+function Get-SetuoraBrowserUrl {
+    $portFile = Join-Path $ApplicationRoot 'runtime-port.txt'
+    $browserPort = '8000'
+    if (Test-Path -LiteralPath $portFile) {
+        $candidate = (Get-Content -LiteralPath $portFile -TotalCount 1).Trim()
+        if ($candidate -notmatch '^[0-9]{4,5}$' -or [int]$candidate -lt 1024 -or [int]$candidate -gt 65535) {
+            throw "The local browser port file is invalid. Choose Start to repair it."
+        }
+        $browserPort = $candidate
     }
-    $browserPort = $candidate
+    return "http://127.0.0.1:$browserPort"
 }
-$BrowserUrl = "http://127.0.0.1:$browserPort"
+
+$BrowserUrl = Get-SetuoraBrowserUrl
 Set-Location -LiteralPath $ApplicationRoot
 
 function Test-SetuoraAdministrator {
@@ -87,7 +92,7 @@ function Install-SetuoraPython {
             "--scope", "machine", "--accept-package-agreements", "--accept-source-agreements",
             "--disable-interactivity"
         )
-        if ($code -eq 3010) { throw "Python installed. Restart Windows, then run Setup / repair again." }
+        if ($code -eq 3010) { throw "Python installed. Restart Windows, then choose Start again." }
         if ($code -eq 0 -and (Get-SetuoraPython)) { return }
         Write-Host "Windows Package Manager did not provide Python. Trying the signed python.org installer..." -ForegroundColor Yellow
     }
@@ -111,11 +116,11 @@ function Install-SetuoraPython {
             "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0"
         ) -Wait -PassThru -WindowStyle Hidden
         if ($process.ExitCode -notin @(0, 3010)) { throw "Python installation failed (exit $($process.ExitCode))." }
-        if ($process.ExitCode -eq 3010) { throw "Python installed. Restart Windows, then run Setup / repair again." }
+        if ($process.ExitCode -eq 3010) { throw "Python installed. Restart Windows, then choose Start again." }
     } finally {
         Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
     }
-    if (-not (Get-SetuoraPython)) { throw "Python installed but was not found. Restart Windows and run Setup / repair again." }
+    if (-not (Get-SetuoraPython)) { throw "Python installed but was not found. Restart Windows and choose Start again." }
 }
 
 function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @()) {
@@ -124,7 +129,7 @@ function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @
         Install-SetuoraPython
         $python = Get-SetuoraPython
     }
-    if (-not $python) { throw "Python 3.11 or newer was not found. Choose Setup / repair first." }
+    if (-not $python) { throw "Python 3.11 or newer was not found. Choose Start to install it." }
     $arguments = @($python["Prefix"]) + @((Join-Path $ApplicationRoot "deploy.py"), $Action) + $ExtraArguments
     return Invoke-SetuoraNative ([string]$python["Name"]) $arguments
 }
@@ -163,7 +168,7 @@ function Read-SetuoraGit([string[]]$Arguments) {
 function Backup-SetuoraSource {
     $python = Join-Path $ApplicationRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) {
-        throw 'The installed Python runtime is missing. Choose Setup / repair before updating.'
+        throw 'The installed Python runtime is missing, so no pre-update backup can be made.'
     }
     Write-Host 'Creating a verified SQLite backup before updating...' -ForegroundColor Cyan
     $code = Invoke-SetuoraNative $python @(
@@ -172,31 +177,68 @@ function Backup-SetuoraSource {
     if ($code -ne 0) { throw 'The pre-update database backup failed. Master was left running.' }
 }
 
-function Update-SetuoraSource {
-    if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) { throw "Git for Windows is required to update this source checkout." }
-    $code = Invoke-SetuoraDeployment "preflight"
-    if ($code -ne 0) { return $code }
-    $null = Read-SetuoraGit @("rev-parse", "--is-inside-work-tree")
-    if (Read-SetuoraGit @("status", "--porcelain", "--untracked-files=all")) {
-        throw "The source checkout has local changes. Save or commit them before updating. Nothing has been stopped or overwritten."
+function Update-SetuoraCheckout {
+    # Fast-forward only a clean checkout that has an upstream. When Git is
+    # unreachable, the checkout has local changes or its history diverged,
+    # warn and let Start run the current commit.
+    if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) {
+        Write-Warning "Git for Windows is missing; starting the current version without checking for updates."
+        return
     }
-    $branch = Read-SetuoraGit @("branch", "--show-current")
-    if (-not $branch) { throw "Check out a Git branch before updating; detached HEAD cannot be updated automatically." }
-    Write-Host "Checking origin/$branch for updates..." -ForegroundColor Cyan
-    $null = Read-SetuoraGit @("fetch", "--quiet", "origin")
-    $null = Read-SetuoraGit @("rev-parse", "--verify", "refs/remotes/origin/$branch")
-    $null = Read-SetuoraGit @("merge-base", "--is-ancestor", "HEAD", "origin/$branch")
-    Backup-SetuoraSource
-    $code = Invoke-SetuoraDeployment "stop"
-    if ($code -ne 0) { return $code }
+    $env:GIT_TERMINAL_PROMPT = "0"
+    try {
+        if (Read-SetuoraGit @("status", "--porcelain", "--untracked-files=all")) {
+            Write-Warning "The source checkout has local changes; starting the current version without updating it."
+            return
+        }
+        $branch = Read-SetuoraGit @("branch", "--show-current")
+        if (-not $branch) {
+            Write-Warning "The checkout is not on a branch; starting the current version without updating it."
+            return
+        }
+        Write-Host "Checking origin/$branch for updates..." -ForegroundColor Cyan
+        $null = Read-SetuoraGit @("fetch", "--quiet", "origin")
+        $null = Read-SetuoraGit @("rev-parse", "--verify", "refs/remotes/origin/$branch")
+        if ((Read-SetuoraGit @("rev-parse", "HEAD")) -eq (Read-SetuoraGit @("rev-parse", "origin/$branch"))) { return }
+    } catch {
+        Write-Warning "Updates could not be checked ($($_.Exception.Message)). Starting the current version."
+        return
+    }
+    try {
+        $null = Read-SetuoraGit @("merge-base", "--is-ancestor", "HEAD", "origin/$branch")
+    } catch {
+        Write-Warning "This checkout has diverged from origin/$branch; starting the current version without updating it."
+        return
+    }
+    if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".env")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".venv\Scripts\python.exe"))) {
+            # No runtime means no verified backup; repair the current version first.
+            Write-Warning "The installed runtime is missing; repairing the current version. Choose Start again afterwards to update."
+            return
+        }
+        $code = Invoke-SetuoraDeployment "preflight"
+        if ($code -ne 0) { throw "Configuration check failed; Master was not updated." }
+        Backup-SetuoraSource
+        $code = Invoke-SetuoraDeployment "stop"
+        if ($code -ne 0) { throw "Master could not be stopped for the update; no files were changed." }
+    }
     try {
         $null = Read-SetuoraGit @("merge", "--ff-only", "origin/$branch")
     } catch {
-        Write-Host "The source update failed. Attempting to restart the previous installation..." -ForegroundColor Yellow
-        $null = Invoke-SetuoraDeployment "start"
-        throw
+        Write-Warning "The update could not be applied ($($_.Exception.Message)). Starting the current version."
     }
-    return Invoke-SetuoraDeployment "update"
+}
+
+function Invoke-SetuoraStart {
+    # Start installs, repairs or updates this copy in place, then runs and
+    # verifies Master.
+    if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { Update-SetuoraCheckout }
+    return Invoke-SetuoraDeployment "setup"
+}
+
+function Open-SetuoraBrowser {
+    # Start can move Master to another free port, so read the saved port again.
+    Start-Process -FilePath (Get-SetuoraBrowserUrl)
 }
 
 function Install-SetuoraUpdate {
@@ -223,19 +265,31 @@ function Install-SetuoraUpdate {
 
 function Show-SetuoraHelp {
     Write-Host "$ProductName controls"
-    Write-Host "Double-click setuora.bat to open the menu."
-    Write-Host "Commands: setup, start, stop, status, open, logs, preflight, update, uninstall, help"
-    Write-Host "Setup, Start, Stop, Logs, Check configuration, Update and Uninstall request Administrator access."
-    Write-Host "Source updates use Git. Installed copies ask you to choose a downloaded installer."
+    Write-Host "Double-click setuora.bat to open the menu: Start, Stop, Uninstall."
+    Write-Host "Start installs, repairs or updates this copy, runs it and opens the browser."
+    Write-Host "Stop keeps Master stopped, even after Windows restarts, until you choose Start."
+    Write-Host "Uninstall saves a verified recovery copy, then removes the application."
+    Write-Host "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, help"
+    Write-Host "Every command except status, open and help requests Administrator access."
     Write-Host "Browser: $BrowserUrl"
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
     if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs", "sftp-install", "sftp-add")) {
-        if (-not (Test-SetuoraAdministrator)) { return Invoke-SetuoraElevated $Action $ExtraArguments }
+        if (-not (Test-SetuoraAdministrator)) {
+            $code = Invoke-SetuoraElevated $Action $ExtraArguments
+            # Open the browser on the original user's desktop, not as Administrator.
+            if ($Action -eq "start" -and $code -eq 0) { Open-SetuoraBrowser }
+            return $code
+        }
     }
     switch ($Action) {
         "help" { Show-SetuoraHelp; return 0 }
+        "start" {
+            $code = Invoke-SetuoraStart
+            if ($code -eq 0 -and -not $Elevated) { Open-SetuoraBrowser }
+            return $code
+        }
         "open" {
             $code = Invoke-SetuoraDeployment "status"
             if ($code -ne 0) { return $code }
@@ -243,7 +297,7 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             return 0
         }
         "update" {
-            if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { return Update-SetuoraSource }
+            if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) { return Invoke-SetuoraStart }
             return Install-SetuoraUpdate
         }
         "update-runtime" { return Invoke-SetuoraDeployment "update" }
@@ -268,44 +322,23 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
 
 function Show-SetuoraMenu {
     while ($true) {
-        Clear-Host
         Write-Host ""
-        Write-Host "  $ProductName" -ForegroundColor Cyan
-        Write-Host "  $ApplicationRoot"
-        Write-Host ""
-        Write-Host "  [1] Open in browser"
-        Write-Host "  [2] Start"
-        Write-Host "  [3] Stop"
-        Write-Host "  [4] Check status"
-        Write-Host "  [5] Setup / repair"
-        if (Test-Path -LiteralPath (Join-Path $ApplicationRoot ".git")) {
-            Write-Host "  [6] Update from Git"
-        } else {
-            Write-Host "  [6] Install downloaded update"
-        }
-        Write-Host "  [7] View recent logs"
-        Write-Host "  [8] Check configuration"
-        Write-Host "  [9] Remove this installation (keep recovery backup)"
-        Write-Host "  [0] Exit"
-        Write-Host ""
-        Write-Host "  Closing this menu leaves Setuora running."
-        $selection = Read-Host "Choose an option (0-9)"
+        Write-Host "$ProductName controls" -ForegroundColor Cyan
+        Write-Host "$ApplicationRoot"
+        Write-Host "[1] Start"
+        Write-Host "[2] Stop"
+        Write-Host "[3] Uninstall (keeps a recovery backup)"
+        $selection = Read-Host "Choose (close this window to exit)"
         $action = switch ($selection) {
-            "1" { "open" }; "2" { "start" }; "3" { "stop" }; "4" { "status" }
-            "5" { "setup" }; "6" { "update" }; "7" { "logs" }; "8" { "preflight" }; "9" { "uninstall" }
-            "0" { return 0 }
-            default { "" }
+            "1" { "start" }; "2" { "stop" }; "3" { "uninstall" }; default { "" }
         }
-        if (-not $action) {
-            Write-Host "Choose a number from 0 to 9." -ForegroundColor Yellow
-        } else {
-            try {
-                $code = Invoke-SetuoraCommand $action
-                if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }
-                if ($code -ne 0) { Write-Host "The action did not complete (exit $code). Review the message above; use View recent logs for server errors." -ForegroundColor Yellow }
-            } catch {
-                Write-Host $_.Exception.Message -ForegroundColor Red
-            }
+        if (-not $action) { Write-Host "Choose a listed number." -ForegroundColor Yellow; continue }
+        try {
+            $code = Invoke-SetuoraCommand $action
+            if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }
+            if ($code -ne 0) { Write-Host "The action did not complete (exit $code). Review the message above; server errors are in $ApplicationRoot\logs." -ForegroundColor Yellow }
+        } catch {
+            Write-Host $_.Exception.Message -ForegroundColor Red
         }
         $null = Read-Host "Press Enter to return to the menu"
     }

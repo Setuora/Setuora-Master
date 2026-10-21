@@ -16,7 +16,7 @@ set "SETUORA_EXIT=%ERRORLEVEL%"
 echo.
 if "%SETUORA_EXIT%"=="0" (
     echo Setuora Master installed and verified.
-    echo Open the installed setuora.bat and choose Open in browser.
+    echo Later, open the installed setuora.bat and choose Start, Stop or Uninstall.
 ) else (
     echo Setup did not finish. Read the error above, then double-click this file to retry.
 )

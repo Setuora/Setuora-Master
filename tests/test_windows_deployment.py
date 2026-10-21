@@ -142,9 +142,9 @@ def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     ):
         assert f'"{action}"' in launcher
     assert "Show-SetuoraMenu" in launcher
-    assert "Install downloaded update" in launcher
-    assert "[9] Remove this installation" in launcher
-    assert '"9" { "uninstall" }' in launcher
+    assert '"1" { "start" }; "2" { "stop" }; "3" { "uninstall" }' in launcher
+    assert "[3] Uninstall" in launcher
+    assert "Choose (close this window to exit)" in launcher
     assert '"-Product", "Master"' in launcher
     assert "if ($action -eq 'uninstall' -and $code -eq 0) { return 0 }" in launcher
     assert "Set-Location -LiteralPath (Join-Path $env:ProgramData 'Setuora')" in launcher
@@ -193,7 +193,9 @@ def test_one_file_master_bootstrap_updates_safely_and_preserves_packaged_install
     )
     assert bootstrap.index(
         "Protect-Checkout", bootstrap.index("'clone', '--single-branch'")
-    ) < bootstrap.index("Invoke-Controller 'setup'")
+    ) < bootstrap.rindex("Invoke-Controller 'setup'")
+    # A failed fast-forward restarts the installed code without fetching again.
+    assert "try { Invoke-Controller 'setup' } catch" in bootstrap
     assert "Get-ChildItem -LiteralPath $InstallRoot -Force" in bootstrap
     assert "$child.Name -in @('.env', 'data', 'logs')" in bootstrap
     assert "Set-CodeAcl $child.FullName -Recursive" in bootstrap
@@ -227,19 +229,25 @@ def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
         assert {"*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"}.issubset(commands[3])
 
 
-def test_source_update_stops_before_mutating_application_files():
+def test_start_updates_source_after_backup_and_stop_then_runs_setup():
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
     update = launcher[
-        launcher.index("function Update-SetuoraSource") : launcher.index(
-            "function Install-SetuoraUpdate"
+        launcher.index("function Update-SetuoraCheckout") : launcher.index(
+            "function Invoke-SetuoraStart"
+        )
+    ]
+    start = launcher[
+        launcher.index("function Invoke-SetuoraStart") : launcher.index(
+            "function Open-SetuoraBrowser"
         )
     ]
     assert "--porcelain" in update and "--untracked-files=all" in update
     assert "--is-ancestor" in update
+    assert '$env:GIT_TERMINAL_PROMPT = "0"' in update
     assert update.index('"fetch"') < update.index('Invoke-SetuoraDeployment "stop"')
     assert update.index("Backup-SetuoraSource") < update.index('Invoke-SetuoraDeployment "stop"')
     assert update.index('Invoke-SetuoraDeployment "stop"') < update.index('"merge", "--ff-only"')
-    assert update.index('"merge", "--ff-only"') < update.index('Invoke-SetuoraDeployment "update"')
+    assert start.index("Update-SetuoraCheckout") < start.index('Invoke-SetuoraDeployment "setup"')
 
 
 def _valid_environment():
@@ -416,7 +424,7 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
     events = []
     monkeypatch.setattr(deploy, "_check_windows", lambda: None)
     monkeypatch.setattr(deploy, "_disable_own_serve", lambda: None)
-    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append("task-end"))
+    monkeypatch.setattr(deploy, "_task", lambda *args, **kwargs: events.append(args[:4]))
     attempts = iter([[{"Pid": 42}], []])
 
     def listeners():
@@ -427,7 +435,91 @@ def test_stop_waits_until_web_process_releases_port(monkeypatch):
     monkeypatch.setattr(deploy, "_is_own_listener", lambda _: True)
     monkeypatch.setattr(deploy.time, "sleep", lambda _: None)
     deploy.stop(argparse.Namespace())
-    assert events == ["task-end", "check-port", "check-port"]
+    # Disabling first keeps the boot trigger and failure restart from racing Stop.
+    assert events == [
+        ("/Change", "/TN", deploy.TASK_NAME, "/DISABLE"),
+        ("/End", "/TN", deploy.TASK_NAME),
+        "check-port",
+        "check-port",
+    ]
+
+
+def test_start_reenables_task_that_stop_disabled(monkeypatch):
+    import argparse
+    import subprocess
+
+    calls = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(deploy, "_disable_own_serve", lambda: None)
+    monkeypatch.setattr(
+        deploy,
+        "_task",
+        lambda *args, **kwargs: calls.append(args) or subprocess.CompletedProcess(args, 0),
+    )
+    monkeypatch.setattr(deploy, "_wait_for_stop", lambda **kwargs: None)
+    monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
+    monkeypatch.setattr(deploy, "_wait_for_health", lambda **kwargs: None)
+    monkeypatch.setattr(deploy, "_configure_private_api", lambda **kwargs: None)
+    deploy.start(argparse.Namespace())
+    enable = ("/Change", "/TN", deploy.TASK_NAME, "/ENABLE")
+    assert calls.index(enable) < calls.index(("/Run", "/TN", deploy.TASK_NAME))
+
+
+def test_failed_setup_health_leaves_master_stopped(monkeypatch):
+    import argparse
+    import subprocess
+
+    import pytest
+
+    events = []
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(
+        deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 1)
+    )
+    monkeypatch.setattr(deploy, "_release_setuora_port", lambda: None)
+    monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
+    monkeypatch.setattr(deploy, "_install_runtime", lambda: None)
+    monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
+    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+
+    def unhealthy(**kwargs):
+        raise deploy.DeploymentError("not healthy")
+
+    monkeypatch.setattr(deploy, "_wait_for_health", unhealthy)
+    with pytest.raises(deploy.DeploymentError, match="not healthy"):
+        deploy.setup(argparse.Namespace())
+    assert events == ["stop"]
+
+
+def test_setup_of_existing_master_tolerates_offline_tailscale(monkeypatch, capsys):
+    import argparse
+    import subprocess
+
+    monkeypatch.setattr(deploy, "_check_windows", lambda: None)
+    monkeypatch.setattr(deploy, "_prepare_environment", lambda: None)
+    monkeypatch.setattr(deploy, "preflight", lambda _: None)
+    monkeypatch.setattr(
+        deploy, "_task", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0)
+    )
+    events = []
+    monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
+    monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
+    monkeypatch.setattr(deploy, "_local_url", lambda: "http://127.0.0.1:8000")
+    monkeypatch.setattr(deploy, "_install_runtime", lambda: None)
+    monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
+    monkeypatch.setattr(deploy, "_wait_for_health", lambda: None)
+    monkeypatch.setattr(deploy, "_write_env", lambda _: None)
+    monkeypatch.setattr(
+        deploy,
+        "_configure_private_api",
+        lambda: (_ for _ in ()).throw(deploy.TailscaleUnavailable("offline")),
+    )
+    deploy.setup(argparse.Namespace())
+    assert events == ["stop"]
+    assert "Private Lite API is offline" in capsys.readouterr().out
 
 
 def test_no_listener_is_free_even_when_loopback_connections_time_out(monkeypatch):
@@ -1100,7 +1192,7 @@ def test_start_recommends_repair_when_background_task_is_missing(monkeypatch):
         return subprocess.CompletedProcess(args, 1, stdout="")
 
     monkeypatch.setattr(deploy, "_task", missing_task)
-    with pytest.raises(deploy.DeploymentError, match="Choose Setup / repair"):
+    with pytest.raises(deploy.DeploymentError, match="Choose Start to repair it"):
         deploy.start(argparse.Namespace())
     assert len(calls) == 1
     assert calls[0][0] == "/Query"

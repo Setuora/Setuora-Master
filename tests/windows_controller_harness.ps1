@@ -10,7 +10,7 @@ if ($parseErrors.Count -ne 0) { throw ($parseErrors -join [Environment]::NewLine
 $definitions = $tree.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false)
 foreach ($definition in $definitions) { Invoke-Expression $definition.Extent.Text }
 $originalElevate = (Get-Command Invoke-SetuoraElevated).ScriptBlock
-$originalUpdate = (Get-Command Update-SetuoraSource).ScriptBlock
+$originalUpdate = (Get-Command Update-SetuoraCheckout).ScriptBlock
 $originalCommand = (Get-Command Invoke-SetuoraCommand).ScriptBlock
 $ApplicationRoot = [IO.Path]::GetTempPath()
 $ControllerPath = "C:\Warehouse & Team\O'Neil\setuora.ps1"
@@ -26,6 +26,10 @@ $script:FailStartProcess = $false
 $script:DirtySource = $false
 $script:FailStop = $false
 $script:FailMerge = $false
+$script:FailFetch = $false
+$script:Diverged = $false
+$script:Latest = 'bbb'
+$script:ElevateExit = 17
 
 function Assert-Equal($Actual, $Expected, [string]$Message) {
     if (($Actual -join '|') -ne ($Expected -join '|')) { throw "$Message. Expected [$($Expected -join '|')], got [$($Actual -join '|')]" }
@@ -33,6 +37,7 @@ function Assert-Equal($Actual, $Expected, [string]$Message) {
 function Reset-Calls { $script:Calls.Clear() }
 function Test-SetuoraAdministrator { return $script:Admin }
 function Test-Path([string]$LiteralPath) { return $script:IsSource }
+function Get-SetuoraBrowserUrl { return $BrowserUrl }
 function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @()) {
     $script:Calls.Add("deploy:$Action")
     if ($Action -eq 'stop' -and $script:FailStop) { return 5 }
@@ -40,9 +45,9 @@ function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @
 }
 function Invoke-SetuoraElevated([string]$Action, [string[]]$ExtraArguments = @()) {
     $script:Calls.Add("elevate:$Action")
-    return 17
+    return $script:ElevateExit
 }
-function Update-SetuoraSource { $script:Calls.Add('source-update'); return 21 }
+function Update-SetuoraCheckout { $script:Calls.Add('source-update') }
 function Install-SetuoraUpdate { $script:Calls.Add('choose-installer'); return 22 }
 function Start-Process([string]$FilePath, [string]$ArgumentList, [string]$Verb, [switch]$Wait, [switch]$PassThru) {
     $script:Calls.Add("process:$FilePath")
@@ -70,6 +75,14 @@ switch ($Case) {
             Assert-Equal (Invoke-SetuoraCommand $action) 0 "$action succeeds without elevation"
             Assert-Equal $script:Calls @("deploy:$action") "$action remains read-only"
         }
+        $script:ElevateExit = 0
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'start') 0 'Elevated Start succeeds'
+        Assert-Equal $script:Calls @('elevate:start', "process:$BrowserUrl") 'The original user opens the browser after an elevated Start'
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'stop') 0 'Elevated Stop succeeds'
+        Assert-Equal $script:Calls @('elevate:stop') 'Stop does not open the browser'
+        $script:ElevateExit = 17
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'help') 0 'Help succeeds without Python/admin'
         Assert-Equal $script:Calls @() 'Help does not invoke deployment'
@@ -97,85 +110,127 @@ switch ($Case) {
     }
     'routing' {
         $script:Admin = $true
-        foreach ($action in @('setup', 'start', 'stop', 'preflight')) {
+        foreach ($action in @('setup', 'stop', 'preflight')) {
             Reset-Calls
             Assert-Equal (Invoke-SetuoraCommand $action) 0 'An administrator deploys directly'
             Assert-Equal $script:Calls @("deploy:$action") 'No nested elevation'
         }
         Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'start') 0 'Start installs or repairs in place'
+        Assert-Equal $script:Calls @('deploy:setup', "process:$BrowserUrl") 'Installed Start repairs, runs and opens the browser'
+        $Elevated = $true
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'start') 0 'Elevated child Start succeeds'
+        Assert-Equal $script:Calls @('deploy:setup') 'The Administrator window never opens the browser'
+        $Elevated = $false
+        $script:DeployExit = 4
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'start') 4 'Failed Start reports its exit code'
+        Assert-Equal $script:Calls @('deploy:setup') 'Failed Start does not open the browser'
+        $script:DeployExit = 0
+        Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'update') 22 'Installed update opens picker'
         Assert-Equal $script:Calls @('choose-installer') 'Installed update does not require Git'
         $script:IsSource = $true
         Reset-Calls
-        Assert-Equal (Invoke-SetuoraCommand 'update') 21 'Source update uses Git workflow'
-        Assert-Equal $script:Calls @('source-update') 'Source update does not use package picker'
+        Assert-Equal (Invoke-SetuoraCommand 'start') 0 'Source Start succeeds'
+        Assert-Equal $script:Calls @('source-update', 'deploy:setup', "process:$BrowserUrl") 'Source Start updates the checkout before setup'
+        Reset-Calls
+        Assert-Equal (Invoke-SetuoraCommand 'update') 0 'Source update is Start'
+        Assert-Equal $script:Calls @('source-update', 'deploy:setup') 'Source update does not use package picker'
         Reset-Calls
         Assert-Equal (Invoke-SetuoraCommand 'update-runtime') 0 'Installer internal update succeeds'
         Assert-Equal $script:Calls @('deploy:update') 'Internal update cannot open a second installer'
     }
-    'source-update' {
-        Set-Item Function:Update-SetuoraSource -Value $originalUpdate
+    'checkout-update' {
+        Set-Item Function:Update-SetuoraCheckout -Value $originalUpdate
         function Get-Command([string]$Name, $ErrorAction) { return [pscustomobject]@{ Source = 'git.exe' } }
         function Backup-SetuoraSource { $script:Calls.Add('backup') }
+        function Write-Warning([string]$Message) { $script:Calls.Add('warn') }
+        function Write-Host {}
         function Read-SetuoraGit([string[]]$Arguments) {
             $script:Calls.Add("git:$($Arguments[0])")
-            if ($Arguments[0] -eq 'branch') { return 'main' }
             if ($Arguments[0] -eq 'status' -and $script:DirtySource) { return ' M app/main.py' }
+            if ($Arguments[0] -eq 'branch') { return 'main' }
+            if ($Arguments[0] -eq 'fetch' -and $script:FailFetch) { throw 'Mock offline' }
+            if ($Arguments[0] -eq 'rev-parse' -and $Arguments[1] -eq 'HEAD') { return 'aaa' }
+            if ($Arguments[0] -eq 'rev-parse' -and $Arguments[1] -eq 'origin/main') { return $script:Latest }
+            if ($Arguments[0] -eq 'merge-base' -and $script:Diverged) { throw 'Mock diverged' }
             if ($Arguments[0] -eq 'merge' -and $script:FailMerge) { throw 'Mock fast-forward failure' }
             return ''
         }
-        Assert-Equal (Update-SetuoraSource) 0 'Clean source update succeeds'
-        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:merge-base', 'backup', 'deploy:stop', 'git:merge', 'deploy:update') 'Source update order'
+        $checked = @('git:status', 'git:branch', 'git:fetch', 'git:rev-parse', 'git:rev-parse', 'git:rev-parse')
+        $script:IsSource = $true
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls ($checked + @('git:merge-base', 'deploy:preflight', 'backup', 'deploy:stop', 'git:merge')) 'Installed checkout backs up and stops before fast-forward'
         $script:DirtySource = $true
         Reset-Calls
-        $caught = $false
-        try { $null = Update-SetuoraSource } catch { $caught = $true }
-        Assert-Equal $caught $true 'Dirty source update refuses changes'
-        Assert-Equal $script:Calls @('deploy:preflight', 'git:rev-parse', 'git:status') 'Dirty source leaves running app alone'
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls @('git:status', 'warn') 'Local changes warn and keep the current commit'
         $script:DirtySource = $false
+        $script:FailFetch = $true
+        Reset-Calls
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls @('git:status', 'git:branch', 'git:fetch', 'warn') 'Unreachable Git warns and keeps the current commit'
+        $script:FailFetch = $false
+        $script:Latest = 'aaa'
+        Reset-Calls
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls $checked 'An up-to-date checkout is left running until setup'
+        $script:Latest = 'bbb'
+        $script:Diverged = $true
+        Reset-Calls
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls ($checked + @('git:merge-base', 'warn')) 'Diverged history warns and keeps the current commit'
+        $script:Diverged = $false
         $script:FailStop = $true
         Reset-Calls
-        Assert-Equal (Update-SetuoraSource) 5 'Failed stop aborts update'
-        if ($script:Calls.Contains('git:merge') -or $script:Calls.Contains('deploy:update')) { throw 'Cannot mutate source after failed stop' }
+        $caught = $false
+        try { Update-SetuoraCheckout } catch { $caught = $true }
+        Assert-Equal $caught $true 'Failed stop fails Start'
+        if ($script:Calls.Contains('git:merge')) { throw 'Cannot change source after a failed stop' }
         $script:FailStop = $false
         $script:FailMerge = $true
         Reset-Calls
-        $caught = $false
-        try { $null = Update-SetuoraSource } catch { $caught = $true }
-        Assert-Equal $caught $true 'Failed merge reports failure'
-        Assert-Equal $script:Calls[$script:Calls.Count - 1] 'deploy:start' 'Failed merge attempts to restart previous app'
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls[$script:Calls.Count - 1] 'warn' 'Failed fast-forward warns so setup restarts the current version'
+        $script:FailMerge = $false
+        $script:IsSource = $false
+        Reset-Calls
+        Update-SetuoraCheckout
+        Assert-Equal $script:Calls ($checked + @('git:merge-base', 'git:merge')) 'A first install has nothing to back up or stop'
     }
     'menu' {
         function Invoke-SetuoraCommand([string]$Action) {
             $script:Calls.Add("menu:$Action")
-            if ($script:FailMenu) { throw 'Controlled action error' }
+            if ($Action -eq 'start' -and $script:FailMenu) { throw 'Controlled action error' }
+            if ($Action -eq 'uninstall') { return $script:UninstallExit }
             return 0
         }
         $script:FailMenu = $false
+        $script:UninstallExit = 0
         $script:Answers = New-Object System.Collections.Generic.Queue[string]
-        $script:Answers.Enqueue('0')
-        Assert-Equal (Show-SetuoraMenu) 0 'Exit closes menu cleanly'
-        Assert-Equal $script:Calls @() 'Exit never invokes deployment'
+        $script:Answers.Enqueue('3')
+        Assert-Equal (Show-SetuoraMenu) 0 'Successful uninstall closes the menu'
+        Assert-Equal $script:Calls @('menu:uninstall') 'Uninstall is option 3'
+        Reset-Calls
         $script:Answers.Enqueue('$(throw "must remain input")')
-        $script:Answers.Enqueue('')
         $script:Answers.Enqueue('0')
+        $script:Answers.Enqueue('3')
         Assert-Equal (Show-SetuoraMenu) 0 'Invalid menu input is handled as plain text'
-        Assert-Equal $script:Calls @() 'Invalid menu input cannot execute commands'
-        $expected = @('open', 'start', 'stop', 'status', 'setup', 'update', 'logs', 'preflight')
-        for ($index = 0; $index -lt $expected.Count; $index++) {
-            $script:Answers.Enqueue([string]($index + 1))
-            $script:Answers.Enqueue('')
-        }
-        $script:Answers.Enqueue('0')
+        Assert-Equal $script:Calls @('menu:uninstall') 'Invalid menu input cannot execute commands'
+        Reset-Calls
+        foreach ($answer in @('1', '', '2', '', '3')) { $script:Answers.Enqueue($answer) }
         Assert-Equal (Show-SetuoraMenu) 0 'Menu selections execute and return to menu'
-        Assert-Equal $script:Calls @($expected | ForEach-Object { "menu:$_" }) 'Every menu selection dispatches the expected action'
+        Assert-Equal $script:Calls @('menu:start', 'menu:stop', 'menu:uninstall') 'Every menu selection dispatches the expected action'
         Reset-Calls
         $script:FailMenu = $true
-        $script:Answers.Enqueue('2')
-        $script:Answers.Enqueue('')
-        $script:Answers.Enqueue('0')
-        Assert-Equal (Show-SetuoraMenu) 0 'A failed action does not strand or close the menu'
-        Assert-Equal $script:Calls @('menu:start') 'Only selected action runs after menu error'
+        $script:UninstallExit = 1
+        foreach ($answer in @('1', '', '3', '')) { $script:Answers.Enqueue($answer) }
+        $caught = $false
+        try { $null = Show-SetuoraMenu } catch { $caught = $_.Exception.Message -like 'Unexpected prompt*' }
+        Assert-Equal $caught $true 'Failed actions return to the menu'
+        Assert-Equal $script:Calls @('menu:start', 'menu:uninstall') 'Only selected actions run after menu errors'
     }
     default { throw "Unknown harness case: $Case" }
 }

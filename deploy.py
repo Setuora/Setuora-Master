@@ -536,7 +536,7 @@ def _tailscale_executable() -> str:
         )
         if result.returncode == 3010:
             raise DeploymentError(
-                "Tailscale installed; Windows needs a restart. Reboot and run Setup / repair again."
+                "Tailscale installed; Windows needs a restart. Reboot and choose Start again."
             )
         if result.returncode == 0:
             for _ in range(20):
@@ -582,7 +582,7 @@ def _tailscale_executable() -> str:
         result = _run(["msiexec.exe", "/i", str(installer), "/quiet", "/norestart"], check=False)
         if result.returncode == 3010:
             raise DeploymentError(
-                "Tailscale installed; Windows needs a restart. Reboot and run Setup / repair again."
+                "Tailscale installed; Windows needs a restart. Reboot and choose Start again."
             )
         if result.returncode != 0:
             raise DeploymentError(f"Tailscale MSI installation failed (exit {result.returncode}).")
@@ -591,9 +591,7 @@ def _tailscale_executable() -> str:
         if found:
             return found
         time.sleep(1)
-    raise DeploymentError(
-        "Tailscale was installed but its CLI was not found. Run Setup / repair again."
-    )
+    raise DeploymentError("Tailscale was installed but its CLI was not found. Choose Start again.")
 
 
 def _tailscale_json(executable: str, *arguments: str) -> dict[str, object]:
@@ -610,7 +608,7 @@ def _tailscale_identity(executable: str) -> str:
         _run(["sc.exe", "start", "Tailscale"], check=False)
     except subprocess.CalledProcessError as exc:
         raise TailscaleUnavailable(
-            "Tailscale's Windows service is unavailable. Run Setup / repair."
+            "Tailscale's Windows service is unavailable. Choose Start."
         ) from exc
     state = None
     for _ in range(20):
@@ -621,7 +619,7 @@ def _tailscale_identity(executable: str) -> str:
             time.sleep(1)
     if state is None:
         raise TailscaleUnavailable(
-            "Tailscale service did not become ready. Restart Windows and run Setup / repair again."
+            "Tailscale service did not become ready. Restart Windows and choose Start again."
         )
     if state.get("BackendState") != "Running":
         print("Sign in to Tailscale in the browser when prompted. Use the same account on Lite.")
@@ -629,7 +627,7 @@ def _tailscale_identity(executable: str) -> str:
             _run([executable, "up", "--unattended=true", "--timeout=5m"])
         except subprocess.CalledProcessError as exc:
             raise TailscaleUnavailable(
-                "Tailscale sign-in is incomplete. Follow the link printed above, then run Setup / repair."
+                "Tailscale sign-in is incomplete. Follow the link printed above, then choose Start."
             ) from exc
     else:
         # `set` changes only this preference; `up` can reject an existing device
@@ -638,13 +636,13 @@ def _tailscale_identity(executable: str) -> str:
             _run([executable, "set", "--unattended=true"])
         except subprocess.CalledProcessError as exc:
             raise TailscaleUnavailable(
-                "Tailscale could not enable unattended mode. Run Setup / repair."
+                "Tailscale could not enable unattended mode. Choose Start."
             ) from exc
     try:
         state = _tailscale_json(executable, "status", "--json")
     except (subprocess.CalledProcessError, ValueError) as exc:
         raise TailscaleUnavailable(
-            "Tailscale disconnected during setup. Retry Setup / repair."
+            "Tailscale disconnected during setup. Choose Start again."
         ) from exc
     name = str((state.get("Self") or {}).get("DNSName") or "").rstrip(".").lower()
     if (
@@ -654,7 +652,7 @@ def _tailscale_identity(executable: str) -> str:
     ):
         raise TailscaleUnavailable(
             "Tailscale is not connected or MagicDNS is disabled. Enable MagicDNS in "
-            "the Tailscale DNS admin page, then run Setup / repair again."
+            "the Tailscale DNS admin page, then choose Start again."
         )
     return name
 
@@ -728,7 +726,7 @@ def _ensure_private_serve(executable: str, host: str) -> None:
     if serve.returncode != 0:
         raise DeploymentError(
             "Tailscale could not enable private HTTPS Serve. Follow the approval link printed above "
-            "to enable MagicDNS and HTTPS certificates, then run Setup / repair again."
+            "to enable MagicDNS and HTTPS certificates, then choose Start again."
         )
     configured = _tailscale_json(executable, "serve", "status", "--json")
     actual, public = _serve_handler(configured, host)
@@ -831,7 +829,7 @@ def _configure_private_api(*, install: bool = True) -> None:
     executable = _tailscale_executable() if install else _find_tailscale_executable()
     if not executable:
         raise TailscaleUnavailable(
-            "Tailscale is missing. Run Setup / repair to restore private Lite access."
+            "Tailscale is missing. Choose Start to restore private Lite access."
         )
     host = _tailscale_identity(executable)
     address = f"https://{host}"
@@ -860,7 +858,7 @@ def _check_private_api_status() -> str:
     executable = _find_tailscale_executable()
     if not executable:
         raise DeploymentError(
-            "Master is running locally, but Tailscale is not installed. Choose Setup / repair."
+            "Master is running locally, but Tailscale is not installed. Choose Start."
         )
     try:
         state = _tailscale_json(executable, "status", "--json")
@@ -873,7 +871,7 @@ def _check_private_api_status() -> str:
         or not host.endswith(".ts.net")
     ):
         raise DeploymentError(
-            "Master is running locally, but Tailscale is disconnected. Choose Setup / repair."
+            "Master is running locally, but Tailscale is disconnected. Choose Start."
         )
     try:
         config = _tailscale_json(executable, "serve", "status", "--json")
@@ -946,9 +944,23 @@ def setup(_args: argparse.Namespace) -> None:
                 ) from exc
         raise
     _task("/Run", "/TN", TASK_NAME)
-    _wait_for_health()
-    _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
-    _configure_private_api()
+    try:
+        _wait_for_health()
+        _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
+        try:
+            _configure_private_api()
+        except TailscaleUnavailable as exc:
+            # An existing Master keeps serving its console when the tailnet is offline.
+            if not existing_task:
+                raise
+            print(f"Private Lite API is offline: {exc}")
+    except (DeploymentError, subprocess.CalledProcessError, OSError):
+        # Leave a failed Start stopped instead of half running.
+        try:
+            stop(_args)
+        except (DeploymentError, subprocess.CalledProcessError, OSError) as stop_exc:
+            print(f"Cleanup: {stop_exc}")
+        raise
     print("Setuora Master is healthy on Windows.")
     print(f"Admin console: {_local_url()}")
 
@@ -958,9 +970,7 @@ def start(_args: argparse.Namespace) -> None:
     preflight(_args)
     task = _task("/Query", "/TN", TASK_NAME, check=False, capture=True)
     if task.returncode != 0:
-        raise DeploymentError(
-            "The Setuora background task is missing. Choose Setup / repair first."
-        )
+        raise DeploymentError("The Setuora background task is missing. Choose Start to repair it.")
     _disable_own_serve()
     _task("/End", "/TN", TASK_NAME, check=False)
     try:
@@ -968,6 +978,8 @@ def start(_args: argparse.Namespace) -> None:
     except DeploymentError:
         _release_setuora_port()
     _select_available_web_port()
+    # Stop disables the boot task; re-enable it before running.
+    _task("/Change", "/TN", TASK_NAME, "/ENABLE")
     _task("/Run", "/TN", TASK_NAME)
     _wait_for_health()
     try:
@@ -980,12 +992,18 @@ def start(_args: argparse.Namespace) -> None:
 def stop(_args: argparse.Namespace) -> None:
     _check_windows()
     _disable_own_serve()
+    # Disable first so the boot trigger or failure restart cannot race with
+    # Stop, and a stopped Master stays stopped after Windows restarts.
+    _task("/Change", "/TN", TASK_NAME, "/DISABLE", check=False)
     _task("/End", "/TN", TASK_NAME, check=False)
     try:
         _wait_for_stop(timeout_seconds=3)
     except DeploymentError:
         _release_setuora_port()
-    print("Setuora Master stopped. The database was preserved.")
+    print(
+        "Setuora Master stopped and stays stopped until you choose Start. "
+        "The database was preserved."
+    )
 
 
 def status(_args: argparse.Namespace) -> None:
@@ -999,8 +1017,8 @@ def status(_args: argparse.Namespace) -> None:
             payload = json.load(response)
     except (OSError, ValueError, urllib.error.URLError) as exc:
         raise DeploymentError(
-            "Setuora Master is not responding. Choose Start, or Setup / repair for a new installation. "
-            "If Start fails, choose View recent logs."
+            "Setuora Master is not responding. Choose Start. "
+            "If Start fails, check logs\\setuora.log."
         ) from exc
     if payload != {"status": "ok", "role": "master"}:
         raise DeploymentError(

@@ -44,7 +44,7 @@ echo.
 if "%SETUORA_EXIT%"=="0" (
   echo Setuora Master completed successfully.
   echo Open "%ProgramData%\Setuora\Setuora-Master-windows\setuora.bat" for the control menu.
-  echo Browser: Open the installed setuora.bat and choose Open in browser.
+  echo Browser: Open the installed setuora.bat and choose Start; it opens the browser when Master is ready.
 ) else (
   echo Setuora Master did not complete. Review the message above.
 )

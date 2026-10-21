@@ -31,13 +31,14 @@ inventory baseline once, and starts synchronization. Tally runs only at Master.
 
 Double-click
 `C:\ProgramData\Setuora\Setuora-Master-windows\setuora.bat` for the controls
-menu: browser, start/stop, status, setup/repair, update, logs, configuration
-checks, and removal with a final recovery backup. The browser action uses the
-saved local port. Closing the menu leaves Setuora running. Actions requiring
-Administrator access open a visible console after Windows approval.
+menu: **Start**, **Stop** and **Uninstall**. Start repairs and runs Master,
+then opens the browser at the saved local port. Stop keeps Master stopped,
+even after Windows restarts, until you choose Start. Uninstall keeps a final
+recovery backup. Each action opens a visible Administrator console after
+Windows approval. Closing the menu leaves Master in its current state.
 
-Choose **Install downloaded update** and select a newer Master `.cmd`
-installer, or run that installer directly. The updater preserves `.env`, the
+To update, run the newer Master `.cmd` installer directly, or run
+`setuora.bat update` and select it. The updater preserves `.env`, the
 database, and backups. The updater restores and verifies the private API route.
 
 See the [installation guide](docs/deployment/installation-guide.md).

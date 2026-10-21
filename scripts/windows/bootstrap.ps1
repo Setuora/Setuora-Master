@@ -136,7 +136,7 @@ function Invoke-Controller([string]$Action) {
 function Backup-Master {
     $python = Join-Path $InstallRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) {
-        throw 'The existing Python runtime is missing. Use the Master Setup / repair control before updating.'
+        throw 'The existing Python runtime is missing. Run the installed setuora.bat setup command before updating.'
     }
     Write-Host 'Creating a verified SQLite backup before updating...'
     Push-Location -LiteralPath $InstallRoot
@@ -207,7 +207,7 @@ try {
                 $null = Invoke-Git @('-C', $InstallRoot, 'merge', '--ff-only', "origin/$Branch")
             } catch {
                 if (Test-Path -LiteralPath (Join-Path $InstallRoot '.env')) {
-                    try { Invoke-Controller 'start' } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
+                    try { Invoke-Controller 'setup' } catch { Write-Host $_.Exception.Message -ForegroundColor Yellow }
                 }
                 throw
             }

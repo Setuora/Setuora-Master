@@ -15,7 +15,7 @@ Setuora administrator password, and complete the Tailscale sign-in link if shown
 If Tailscale asks the network owner to approve the device, MagicDNS, or HTTPS,
 complete that approval and double-click the BAT again.
 
-On the Master computer, open `setuora.bat` and choose **Open in browser**. Set up the existing Tally
+On the Master computer, open `setuora.bat` and choose **Start**; it opens the browser. Set up the existing Tally
 company and gateway in Setuora, then add each franchise. Copy its connection
 details and share them privately with that franchise's Lite administrator.
 Tally itself is a separately licensed application and is not installed by the BAT.
@@ -41,7 +41,7 @@ installation type; it does not erase the database. The installed `setuora.bat`
 provides daily controls and status.
 
 To remove either product, open that product's installed `setuora.bat` and choose
-**Remove this installation**. Each removal stops that product and keeps a final
+**Uninstall** on Master or **Remove this installation** on Lite. Each removal stops that product and keeps a final
 recovery bundle in `C:\ProgramData\Setuora\Recovery\Master` or
 `C:\ProgramData\Setuora\Recovery\Lite`. Keep the recovery folder until the
 data is no longer needed. A coinstalled product remains in place.

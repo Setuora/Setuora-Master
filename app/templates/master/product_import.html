@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Import from Tally - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Products</p>
+    <h1>Import from Tally</h1>
+    <p class="muted">Tick the stock items to import and the franchises that should receive them. Items already on a franchise are linked to Tally instead of duplicated.</p>
+  </div>
+  <div class="actions"><a class="button" href="/network/products">Back to products</a></div>
+</section>
+
+<form method="post" action="/network/products/import" class="stack">
+  <section class="panel">
+    <div class="section-title"><h2>Franchises</h2><span>Each ticked franchise receives every ticked item.</span></div>
+    {% for node in nodes %}
+    <label class="checkline"><input type="checkbox" name="franchise" value="{{ node.public_id }}"> <strong>{{ node.code }}</strong> {{ node.name }}</label>
+    {% else %}
+    <p class="muted">No active franchises. <a href="/franchises">Add a franchise</a> first.</p>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <div class="section-title">
+      <h2>Tally stock items</h2>
+      <span>{{ rows|length }} item{{ '' if rows|length == 1 else 's' }}</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col"><label class="checkline"><input type="checkbox" data-select-all aria-label="Select all importable items"> All</label></th>
+            <th scope="col">Stock item</th><th scope="col">Product code</th><th scope="col">Group</th><th scope="col">HSN</th><th scope="col" class="numeric">GST %</th><th scope="col">Unit</th><th scope="col" class="numeric">Rate</th><th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td><input type="checkbox" name="item" value="{{ row.item.name }}" aria-label="Import {{ row.item.name }}" {{ 'disabled' if row.blocker else 'data-importable' }}></td>
+            <td class="cell-wrap"><strong>{{ row.item.name }}</strong></td>
+            <td>{{ row.code }}</td>
+            <td class="cell-wrap">{{ row.item.parent }}</td>
+            <td>{{ row.item.hsn }}</td>
+            <td class="numeric">{{ '%g'|format(row.item.gst_rate) if row.item.gst_rate is not none else '' }}</td>
+            <td>{{ row.item.unit or 'Pcs' }}</td>
+            <td class="numeric">{{ '%.2f'|format(row.item.standard_rate) if row.item.standard_rate is not none else '' }}</td>
+            <td class="cell-wrap">
+              {% if row.blocker %}<span class="status failed">Cannot import</span><small>{{ row.blocker }}</small>
+              {% elif row.known %}<span class="status synced">On Master</span>
+              {% else %}<span class="status">New</span>{% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="muted">Tally returned no stock items for the active company.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div><button class="button primary" type="submit" {{ 'disabled' if not nodes or not rows else '' }}>Import ticked items</button></div>
+</form>
+
+<script nonce="{{ csp_nonce(request) }}">
+  document.querySelector("[data-select-all]")?.addEventListener("change", (event) => {
+    document.querySelectorAll("input[data-importable]").forEach((box) => { box.checked = event.target.checked; });
+  });
+</script>
+{% endblock %}

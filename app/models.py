@@ -206,6 +206,10 @@ class Product(Base):
     purchase_qr_print_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
     tally_stock_item_name: Mapped[str] = mapped_column(String(180))
     alternate_tally_stock_item_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    # Set when the product was imported from the central Tally item master; live
+    # sync only maintains these products.
+    tally_guid: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    tally_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -214,6 +218,25 @@ class Product(Base):
         back_populates="product"
     )
     audit_assignments: Mapped[list["AuditAssignment"]] = relationship(back_populates="product")
+
+
+class ProductIdentityHistory(Base):
+    """A product identity replaced by Tally live sync.
+
+    Lite freezes product details into queued events, so events created before a
+    franchise applied the change still carry this identity and must be accepted.
+    """
+
+    __tablename__ = "product_identity_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    product_name: Mapped[str] = mapped_column(String(180))
+    tally_stock_item_name: Mapped[str] = mapped_column(String(180))
+    hsn: Mapped[str] = mapped_column(String(40))
+    unit: Mapped[str] = mapped_column(String(40))
+    gst_rate: Mapped[float] = mapped_column(Float)
+    replaced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class StorageLocation(Base):

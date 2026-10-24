@@ -255,7 +255,13 @@ def get_commands(
                 "INVALID_LIMIT",
                 "limit must be an integer from 1 to 100.",
             )
-        commands = list_unacknowledged_commands(db, context.node, limit=limit)
+        supported_types = request.headers.get("x-setuora-command-types", "").split(",")
+        commands = list_unacknowledged_commands(
+            db,
+            context.node,
+            limit=limit,
+            supported_types=supported_types,
+        )
         db.commit()
     except (NodeAuthError, NetworkIngestError) as exc:
         db.rollback()

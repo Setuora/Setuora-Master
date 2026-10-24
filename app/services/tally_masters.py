@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -46,6 +47,18 @@ class TallyLedger:
     name: str
     parent: str = ""
     closing_balance: str = ""
+
+
+@dataclass(frozen=True)
+class TallyStockItem:
+    name: str
+    guid: str = ""
+    parent: str = ""
+    unit: str = ""
+    hsn: str = ""
+    gst_rate: float | None = None
+    standard_rate: float | None = None
+    alias: str = ""
 
 
 @dataclass(frozen=True)
@@ -294,6 +307,25 @@ def build_sales_book_xml(company_name: str, from_date: date, to_date: date) -> s
     return ET.tostring(envelope, encoding="unicode")
 
 
+def build_stock_item_list_xml(company_name: str) -> str:
+    envelope, _ = _build_collection_export(
+        "Setuora Stock Item List",
+        "StockItem",
+        (
+            "Name",
+            "GUID",
+            "Parent",
+            "BaseUnits",
+            "LanguageName",
+            "GSTDetails",
+            "HSNDetails",
+            "StandardPriceList",
+        ),
+        company_name=company_name.strip(),
+    )
+    return ET.tostring(envelope, encoding="unicode")
+
+
 def _local_tag(node: ET.Element) -> str:
     return node.tag.rsplit("}", 1)[-1].upper()
 
@@ -349,7 +381,9 @@ def _sanitize_tally_xml(body: str) -> str:
     )
 
 
-def _post_read_request(settings: dict[str, str], xml: str) -> tuple[str, ET.Element]:
+def _post_read_request(
+    settings: dict[str, str], xml: str, *, timeout: int = 8
+) -> tuple[str, ET.Element]:
     try:
         url = build_tally_url(settings)
     except ValueError as exc:
@@ -359,7 +393,7 @@ def _post_read_request(settings: dict[str, str], xml: str) -> tuple[str, ET.Elem
     )
     try:
         # build_tally_url fixes the scheme and rejects URL syntax in the host.
-        with urlopen(request, timeout=8) as response:  # nosec B310
+        with urlopen(request, timeout=timeout) as response:  # nosec B310
             body = read_tally_response(response)
     except URLError as exc:
         reason = getattr(exc, "reason", exc)
@@ -398,6 +432,113 @@ def fetch_tally_companies(settings: dict[str, str]) -> list[str]:
             names.append(name)
             seen.add(name.casefold())
     return sorted(names, key=str.casefold)
+
+
+# A full item master can be large, so it gets a longer read timeout than lookups.
+STOCK_ITEM_READ_TIMEOUT_SECONDS = 60
+
+
+def _tally_number(raw: str) -> float | None:
+    value = raw.strip().split("/", 1)[0].replace(",", "").strip()
+    if not value:
+        return None
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return abs(number) if math.isfinite(number) else None
+
+
+def _latest_entry(node: ET.Element, list_tag: str, *date_tags: str) -> ET.Element | None:
+    """Tally keeps dated history lists; the entry with the latest date applies today."""
+
+    entries = [child for child in node if _local_tag(child) == list_tag]
+    if not entries:
+        return None
+    return max(
+        enumerate(entries),
+        key=lambda pair: (_direct_text(pair[1], *date_tags), pair[0]),
+    )[1]
+
+
+def _stock_item_hsn(item: ET.Element) -> str:
+    for list_tag in ("HSNDETAILS.LIST", "GSTDETAILS.LIST"):
+        entry = _latest_entry(item, list_tag, "APPLICABLEFROM")
+        if entry is not None:
+            hsn = _first_text(entry, "HSNCODE", "HSN")
+            if hsn:
+                return hsn
+    return ""
+
+
+def _stock_item_gst_rate(item: ET.Element) -> float | None:
+    entry = _latest_entry(item, "GSTDETAILS.LIST", "APPLICABLEFROM")
+    if entry is None:
+        return None
+    split_total = 0.0
+    split_found = False
+    for rate in entry.iter():
+        if _local_tag(rate) != "RATEDETAILS.LIST":
+            continue
+        head = _direct_text(rate, "GSTRATEDUTYHEAD").casefold()
+        value = _tally_number(_direct_text(rate, "GSTRATE"))
+        if value is None:
+            continue
+        if head in {"integrated tax", "igst"}:
+            return value
+        if head in {"central tax", "cgst", "state tax", "sgst/utgst", "sgst", "utgst"}:
+            split_total += value
+            split_found = True
+    return split_total if split_found else None
+
+
+def _stock_item_standard_rate(item: ET.Element) -> float | None:
+    entry = _latest_entry(item, "STANDARDPRICELIST.LIST", "DATE")
+    return _tally_number(_direct_text(entry, "RATE")) if entry is not None else None
+
+
+def _stock_item_alias(item: ET.Element, name: str) -> str:
+    for node in item.iter():
+        if _local_tag(node) != "NAME.LIST":
+            continue
+        for child in node:
+            text = (child.text or "").strip()
+            if _local_tag(child) == "NAME" and text and text.casefold() != name.casefold():
+                return text
+    return ""
+
+
+def fetch_tally_stock_items(settings: dict[str, str], company_name: str) -> list[TallyStockItem]:
+    clean_company = company_name.strip()
+    if not clean_company:
+        raise TallyDataError("Choose a Tally company before loading stock items.")
+    _, root = _post_read_request(
+        settings,
+        build_stock_item_list_xml(clean_company),
+        timeout=STOCK_ITEM_READ_TIMEOUT_SECONDS,
+    )
+    items: list[TallyStockItem] = []
+    seen: set[str] = set()
+    for node in root.iter():
+        if _local_tag(node) != "STOCKITEM":
+            continue
+        name = (node.attrib.get("NAME") or "").strip() or _direct_text(node, "NAME")
+        if not name or name.casefold() in seen:
+            continue
+        items.append(
+            TallyStockItem(
+                name=name,
+                guid=_direct_text(node, "GUID"),
+                parent=_direct_text(node, "PARENT"),
+                unit=_direct_text(node, "BASEUNITS"),
+                hsn=_stock_item_hsn(node),
+                gst_rate=_stock_item_gst_rate(node),
+                standard_rate=_stock_item_standard_rate(node),
+                alias=_stock_item_alias(node, name),
+            )
+        )
+        seen.add(name.casefold())
+    return sorted(items, key=lambda item: item.name.casefold())
 
 
 def fetch_tally_ledgers(settings: dict[str, str], company_name: str) -> list[TallyLedger]:

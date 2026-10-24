@@ -181,7 +181,8 @@ def test_role_access_page_is_super_admin_only_and_has_master_navigation():
     assert ">Purchase</summary>" not in root_response.text
     assert ">Sales</summary>" not in root_response.text
     assert "/batches" not in root_response.text
-    assert "/products" not in root_response.text
+    assert 'href="/products"' not in root_response.text
+    assert 'href="/network/products"' in root_response.text
     assert "/serials" not in root_response.text
     assert 'href="/network/transfers"' in root_response.text
     assert 'href="/network/reports"' in root_response.text

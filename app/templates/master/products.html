@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Products - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">Setuora Master</p>
+    <h1>Products</h1>
+    <p class="muted">Import stock items from central Tally for chosen franchises. Master creates them and sends them to each franchise's Lite. Live sync keeps names, HSN, GST and units in step with Tally.</p>
+  </div>
+  <div class="actions">
+    <a class="button primary" href="/network/products/import">Import from Tally</a>
+  </div>
+</section>
+
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
+
+<section class="panel">
+  <div class="section-title"><h2>Live sync with Tally</h2><span>Applies to products imported from Tally.</span></div>
+  <dl class="details">
+    <dt>Schedule</dt><dd>{{ 'Off' if sync_minutes == 0 else 'Every ' ~ sync_minutes ~ ' minute' ~ ('' if sync_minutes == 1 else 's') }}</dd>
+    <dt>Last run</dt><dd>{{ last_sync_at|report_date if last_sync_at else 'Not run yet' }}</dd>
+    <dt>Result</dt><dd>{{ last_sync_result or 'Not run yet' }}</dd>
+  </dl>
+  <form method="post" action="/network/products/sync-settings" class="grid-form">
+    <label>Sync every (minutes)
+      <input name="sync_minutes" type="number" min="0" max="{{ max_sync_minutes }}" step="1" value="{{ sync_minutes }}" required>
+      <small>0 turns live sync off.</small>
+    </label>
+    <div class="span-all"><button class="button" type="submit">Save schedule</button></div>
+  </form>
+  <form method="post" action="/network/products/sync-now">
+    <button class="button" type="submit">Sync now</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Franchise products</h2><span>{{ products|length }} product{{ '' if products|length == 1 else 's' }}</span></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">Code</th><th scope="col">Product</th><th scope="col">Tally stock item</th><th scope="col">HSN</th><th scope="col" class="numeric">GST %</th><th scope="col">Unit</th><th scope="col">Tally link</th></tr></thead>
+      <tbody>
+        {% for product in products %}
+        <tr>
+          <td><strong>{{ product.product_code }}</strong></td>
+          <td class="cell-wrap">{{ product.product_name }}</td>
+          <td class="cell-wrap">{{ product.tally_stock_item_name }}</td>
+          <td>{{ product.hsn }}</td>
+          <td class="numeric">{{ '%g'|format(product.gst_rate or 0) }}</td>
+          <td>{{ product.unit }}</td>
+          <td>
+            {% if product.tally_synced_at %}
+            <span class="status synced">Live</span>
+            <small class="cell-date">{{ product.tally_synced_at|report_date }}</small>
+            {% else %}
+            <span class="status">Manual</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">No products yet. Import them from Tally or create QR codes for a franchise.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

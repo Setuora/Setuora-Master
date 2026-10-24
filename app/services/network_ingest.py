@@ -21,6 +21,7 @@ from app.models import (
     NetworkStock,
     NodeCommand,
     Product,
+    ProductIdentityHistory,
     Receipt,
     ReceiptStatus,
     Serial,
@@ -84,6 +85,10 @@ class NetworkIngestError(Exception):
         self.code = code
         self.message = message
         self.details = details
+
+
+PRODUCT_UPSERT_COMMAND = "PRODUCT_UPSERT"
+OPT_IN_COMMAND_TYPES = frozenset({PRODUCT_UPSERT_COMMAND})
 
 
 def _canonical_json(value: Any) -> str:
@@ -171,15 +176,20 @@ def list_unacknowledged_commands(
     node: FranchiseNode,
     *,
     limit: int = 100,
+    supported_types: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     # Lite caps a response body at 5 MiB. A backlog of otherwise valid QR
     # commands can exceed that limit when the count alone is capped at 100.
     response_budget = 4 * 1024 * 1024
+    # Lite stops at the first command it cannot apply, so opt-in types stay
+    # queued until that Lite says it understands them.
+    withheld = OPT_IN_COMMAND_TYPES - {value.strip().upper() for value in supported_types}
     commands = db.scalars(
         select(NodeCommand)
         .where(
             NodeCommand.target_franchise_id == node.id,
             NodeCommand.acknowledged_at.is_(None),
+            NodeCommand.command_type.not_in(withheld),
         )
         .order_by(NodeCommand.id)
         .limit(max(1, min(limit, 100)))
@@ -365,6 +375,20 @@ def _validate_snapshot_product_identity(
     )
     if abs(float(product.gst_rate or 0) - float(item.gst_rate)) > 0.0001:
         mismatches.append("gst_rate")
+    if mismatches and "product_code" not in mismatches:
+        # Lite froze this event before it applied a Tally live-sync change.
+        for previous in db.scalars(
+            select(ProductIdentityHistory).where(ProductIdentityHistory.product_id == product.id)
+        ):
+            if (
+                _identity_text(previous.product_name) == _identity_text(item.product_name)
+                and _identity_text(previous.tally_stock_item_name)
+                == _identity_text(item.tally_stock_item_name)
+                and _identity_text(previous.hsn) == _identity_text(item.hsn)
+                and _identity_text(previous.unit) == _identity_text(item.unit)
+                and abs(float(previous.gst_rate or 0) - float(item.gst_rate)) <= 0.0001
+            ):
+                return
     if mismatches:
         raise NetworkIngestError(
             409,

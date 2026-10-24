@@ -58,7 +58,7 @@ def test_maintenance_exposes_backup_controls_but_no_browser_reset_or_restore(
     backup_status = SimpleNamespace(
         enabled=True,
         directory="/tmp/backups",
-        interval_hours=24,
+        interval_minutes=30,
         retention_count=14,
         latest_backup=None,
         offsite_directory=None,
@@ -135,7 +135,7 @@ def test_backup_settings_route_is_super_admin_only():
         payload = {
             "automatic_backups_enabled": "false",
             "backup_directory": "/tmp/backups",
-            "backup_interval_hours": "24",
+            "backup_interval_minutes": "30",
             "backup_retention_count": "14",
             "backup_offsite_directory": "",
         }
@@ -186,7 +186,7 @@ def test_invalid_backup_settings_redirect_with_validation_error(monkeypatch):
             data={
                 "automatic_backups_enabled": "false",
                 "backup_directory": "/invalid/test/path",
-                "backup_interval_hours": "24",
+                "backup_interval_minutes": "30",
                 "backup_retention_count": "14",
                 "backup_offsite_directory": "",
             },

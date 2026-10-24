@@ -173,6 +173,15 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
                         "ALTER TABLE products ADD COLUMN purchase_qr_print_allowed BOOLEAN DEFAULT 0"
                     )
                 )
+            if "tally_guid" not in product_columns:
+                connection.execute(text("ALTER TABLE products ADD COLUMN tally_guid VARCHAR(120)"))
+                connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_products_tally_guid ON products (tally_guid)"
+                    )
+                )
+            if "tally_synced_at" not in product_columns:
+                connection.execute(text("ALTER TABLE products ADD COLUMN tally_synced_at DATETIME"))
             connection.execute(
                 text(
                     "UPDATE products SET shelf_verification_interval = 1 "

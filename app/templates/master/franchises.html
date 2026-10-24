@@ -42,7 +42,7 @@
 <section class="panel">
   <div class="section-title"><h2>2. Add a franchise</h2><span>One entry for each independent Lite server.</span></div>
   <form method="post" action="/franchises" class="grid-form">
-    <label>Permanent franchise code<input name="code" value="{{ form_values.get('code', '') }}" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,19}" placeholder="BLR-01" required><small>Use letters, numbers, hyphens or underscores. This identifies its stock and cannot be changed later.</small></label>
+    <label>Permanent franchise code<input name="code" value="{{ form_values.get('code', '') }}" maxlength="20" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{0,19}" placeholder="BLR-01" required><small>Use letters, numbers, hyphens or underscores. This identifies its stock and cannot be changed later.</small></label>
     <label>Franchise name<input name="name" value="{{ form_values.get('name', '') }}" maxlength="180" placeholder="Bengaluru warehouse" required></label>
     <label>Location<input name="location" value="{{ form_values.get('location', '') }}" maxlength="180" placeholder="Bengaluru" required></label>
     <label>Tally godown (optional)<input name="tally_godown_name" value="{{ form_values.get('tally_godown_name', '') }}" maxlength="180"><small>Use the exact godown name in central Tally, or leave blank to use Master's default.</small></label>

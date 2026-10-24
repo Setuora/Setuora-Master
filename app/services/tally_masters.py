@@ -117,6 +117,10 @@ def collect_master_requirements(db: Session) -> list[MasterRequirement]:
         "Settings",
         "Round off posting ledger",
     )
+    # Franchise purchases post to Tally with these ledgers.
+    _add(requirements, "Ledger", settings["purchase_ledger_name"], "Settings", "Purchase posting ledger")
+    _add(requirements, "Ledger", settings["cgst_ledger_name"], "Settings", "Input CGST posting ledger")
+    _add(requirements, "Ledger", settings["sgst_ledger_name"], "Settings", "Input SGST posting ledger")
     mappings = parse_sales_gst_ledger_mappings(settings.get("sales_gst_ledger_mappings"))
     for gst_rate, ledgers in mappings.items():
         source = f"Sales GST {gst_rate}% mapping"

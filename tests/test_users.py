@@ -10,6 +10,7 @@ from app.main import app
 from app.models import (
     Batch,
     BatchType,
+    FranchiseNode,
     TallyLedgerCache,
     TallySalesVoucherCache,
     User,
@@ -82,6 +83,48 @@ def test_super_admin_can_delete_unused_user():
     assert deleted is None
 
 
+def test_franchise_service_accounts_cannot_be_managed_or_used_to_sign_in():
+    engine, Session = make_session()
+    with Session() as db:
+        db.add(User(id=1, username="root", password_hash="x", role="super_admin", active=True))
+        db.add(User(id=2, username="node_blr-01", password_hash="x", role="admin", active=True))
+        db.add(FranchiseNode(code="BLR-01", name="BANGALORE", location="BLR", service_user_id=2))
+        db.commit()
+
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        client = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"})
+        authenticate_client(client, 1)
+        page = client.get("/users")
+        password = client.post(
+            "/users/2/password",
+            data={"new_password": "ServicePass#2026", "confirm_password": "ServicePass#2026"},
+        )
+        client.post("/users/2/delete")
+        login = TestClient(app, follow_redirects=False, headers={"Origin": "http://testserver"}).post(
+            "/login", data={"username": "node_blr-01", "password": "ServicePass#2026"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    with Session() as db:
+        service_user = db.get(User, 2)
+        password_hash = service_user.password_hash
+    engine.dispose()
+
+    assert "node_blr-01" not in page.text
+    assert password.headers["location"] == "/users?error=user_not_found"
+    assert password_hash == "x"
+    assert login.status_code == 400
+
+
 def test_user_creation_accepts_multiple_master_roles():
     engine, Session = make_session()
     with Session() as db:
@@ -107,6 +150,7 @@ def test_user_creation_accepts_multiple_master_roles():
     assert response.headers["location"] == "/users"
     assert dual is not None
     assert dual.role == "admin,directors"
+    assert dual.must_change_password is True
     assert "admin, directors" in after_page.body.decode()
 
 

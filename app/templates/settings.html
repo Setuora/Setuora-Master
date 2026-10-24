@@ -47,7 +47,7 @@
                 <button class="button small" type="submit">Set active</button>
               </form>
               <form method="post" action="/settings/companies/{{ company.id }}/delete"
-                    onsubmit="return confirm('Delete the company profile {{ company.name }}?');">
+                    data-confirm="Delete the company profile {{ company.name }}?">
                 <button class="button small ghost" type="submit">Delete</button>
               </form>
               {% endif %}
@@ -75,6 +75,11 @@
       <label>Tally port<input name="tally_port" type="number" min="1" max="65535" value="{{ settings.tally_port }}" required></label>
     </div>
     {{ sales_ledger_editor() }}
+    <div class="three-col">
+      <label>Purchase ledger<input name="purchase_ledger_name"></label>
+      <label>Input CGST ledger<input name="cgst_ledger_name"></label>
+      <label>Input SGST ledger<input name="sgst_ledger_name"></label>
+    </div>
     <label>Round off ledger<input name="round_off_ledger_name" required></label>
     <div><button class="button primary" type="submit">Add company</button></div>
   </form>
@@ -105,9 +110,11 @@
       <input type="hidden" name="sales_voucher_type" value="{{ settings.sales_voucher_type }}">
       <input type="hidden" name="purchase_voucher_type" value="{{ settings.purchase_voucher_type }}">
       <input type="hidden" name="sales_ledger_name" value="{{ settings.sales_ledger_name }}">
-      <input type="hidden" name="purchase_ledger_name" value="{{ settings.purchase_ledger_name }}">
-      <input type="hidden" name="cgst_ledger_name" value="{{ settings.cgst_ledger_name }}">
-      <input type="hidden" name="sgst_ledger_name" value="{{ settings.sgst_ledger_name }}">
+      <div class="three-col">
+        <label>Purchase ledger<input name="purchase_ledger_name" value="{{ settings.purchase_ledger_name }}"></label>
+        <label>Input CGST ledger<input name="cgst_ledger_name" value="{{ settings.cgst_ledger_name }}"></label>
+        <label>Input SGST ledger<input name="sgst_ledger_name" value="{{ settings.sgst_ledger_name }}"></label>
+      </div>
       {{ sales_ledger_editor(settings.sales_gst_ledger_mappings) }}
       <label>Round off ledger<input name="round_off_ledger_name" value="{{ settings.round_off_ledger_name }}" required></label>
       <label>Retry interval seconds<input name="retry_interval_seconds" type="number" min="30" step="1" value="{{ settings.retry_interval_seconds }}" required></label>

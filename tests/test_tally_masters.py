@@ -67,7 +67,7 @@ def test_collect_master_requirements_includes_products_and_settings(db_session):
     assert ("Ledger", "Output IGST @ 5%") in names
 
 
-def test_removed_legacy_fields_do_not_create_missing_requirements(db_session):
+def test_removed_legacy_fields_do_not_create_requirements(db_session):
     update_settings(
         db_session,
         {
@@ -75,20 +75,34 @@ def test_removed_legacy_fields_do_not_create_missing_requirements(db_session):
             "sales_voucher_type": "",
             "purchase_voucher_type": "",
             "sales_ledger_name": "",
-            "purchase_ledger_name": "",
-            "cgst_ledger_name": "",
-            "sgst_ledger_name": "",
         },
     )
 
     requirements = collect_master_requirements(db_session)
 
     assert all(item.master_name for item in requirements)
-    assert {item.master_type for item in requirements} == {"Company", "Ledger"}
-    assert {(item.master_type, item.master_name) for item in requirements} == {
-        ("Company", VALID_SETTINGS["company_name"]),
-        ("Ledger", VALID_SETTINGS["round_off_ledger_name"]),
+    assert ("Voucher Type", "") not in {
+        (item.master_type, item.master_name) for item in requirements
     }
+
+
+def test_franchise_purchase_ledgers_are_required(db_session):
+    update_settings(
+        db_session,
+        {
+            **VALID_SETTINGS,
+            "purchase_ledger_name": "",
+            "cgst_ledger_name": "Input CGST",
+            "sgst_ledger_name": "Input SGST",
+        },
+    )
+
+    requirements = collect_master_requirements(db_session)
+    by_detail = {item.detail: item for item in requirements}
+
+    assert by_detail["Purchase posting ledger"].local_status == "MISSING"
+    assert by_detail["Input CGST posting ledger"].master_name == "Input CGST"
+    assert by_detail["Input SGST posting ledger"].local_status == "READY"
 
 
 def test_confirmation_updates_readiness_counts(db_session):

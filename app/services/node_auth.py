@@ -51,6 +51,18 @@ def _aware(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def node_service_user_ids(db: Session) -> set[int]:
+    return set(
+        db.scalars(
+            select(FranchiseNode.service_user_id).where(FranchiseNode.service_user_id.is_not(None))
+        )
+    )
+
+
+def is_node_service_user(db: Session, user: User) -> bool:
+    return user.id in node_service_user_ids(db)
+
+
 def ensure_node_service_user(db: Session, node: FranchiseNode) -> User:
     if node.service_user_id:
         service_user = db.get(User, node.service_user_id)

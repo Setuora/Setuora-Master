@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.security import MIN_PASSWORD_LENGTH, hash_password
 from app.services.change_audit import record_change
+from app.services.node_auth import is_node_service_user, node_service_user_ids
 from app.services.settings import list_companies
 from app.services.tally_access import (
     access_page_data,
@@ -40,7 +41,15 @@ def _users_context(
     error: str | None = None,
     success: str | None = None,
 ) -> dict[str, object]:
-    users = db.scalars(select(User).where(User.deleted_at.is_(None)).order_by(User.username)).all()
+    # Franchise service accounts only attribute mirrored rows; they are not people.
+    service_ids = node_service_user_ids(db)
+    users = [
+        user
+        for user in db.scalars(
+            select(User).where(User.deleted_at.is_(None)).order_by(User.username)
+        ).all()
+        if user.id not in service_ids
+    ]
     roles = [Role.DIRECTORS, Role.ADMIN]
     if has_role(current, Role.SUPER_ADMIN):
         roles.append(Role.SUPER_ADMIN)
@@ -115,6 +124,8 @@ def create_user(
             password_hash=hash_password(password),
             role=role_value,
             active=True,
+            # The administrator chose this password, so the user replaces it on first sign-in.
+            must_change_password=True,
         )
     )
     try:
@@ -146,7 +157,7 @@ def update_tally_access(
 ):
     current = require_permission(request, db, "users_manage")
     target = db.get(User, user_id)
-    if not target or target.deleted_at:
+    if not target or target.deleted_at or is_node_service_user(db, target):
         return RedirectResponse("/users?error=user_not_found", status_code=303)
     try:
         before = user_access_snapshot(db, target.id)
@@ -181,7 +192,12 @@ def update_tally_access(
 def toggle_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     current = require_permission(request, db, "users_manage")
     target = db.get(User, user_id)
-    if target and target.id != current.id and not target.deleted_at:
+    if (
+        target
+        and target.id != current.id
+        and not target.deleted_at
+        and not is_node_service_user(db, target)
+    ):
         target.active = not target.active
         db.commit()
     return RedirectResponse("/users", status_code=303)
@@ -198,7 +214,7 @@ def reset_user_password(
 ):
     current = require_user(request, db, {Role.SUPER_ADMIN})
     target = db.get(User, user_id)
-    if not target or target.deleted_at:
+    if not target or target.deleted_at or is_node_service_user(db, target):
         return RedirectResponse("/users?error=user_not_found", status_code=303)
     if target.id == current.id:
         return RedirectResponse("/users?error=password_reset_self", status_code=303)
@@ -217,7 +233,7 @@ def reset_user_password(
 def delete_user(request: Request, user_id: int, db: Session = Depends(get_db)):
     current = require_user(request, db, {Role.SUPER_ADMIN})
     target = db.get(User, user_id)
-    if not target:
+    if not target or is_node_service_user(db, target):
         return RedirectResponse("/users", status_code=303)
     if target.id == current.id:
         return RedirectResponse("/users?error=user_delete_self", status_code=303)

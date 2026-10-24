@@ -5,7 +5,14 @@ from xml.etree import ElementTree as ET
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.models import NodeCommand, Product, ProductIdentityHistory, utc_now
+from app.models import (
+    NetworkStock,
+    NodeCommand,
+    Product,
+    ProductIdentityHistory,
+    Serial,
+    utc_now,
+)
 from app.services import tally_masters, tally_products
 from app.services.network_ingest import _namespaced_code
 from app.services.settings import add_company, update_settings
@@ -153,6 +160,44 @@ def test_import_creates_products_per_franchise_and_queues_product_commands(api):
     assert payload["franchise_code"] == "FIMP1"
     assert payload["product"]["product_code"] == "RICE5"
     assert payload["product"]["gst_rate"] == 5.0
+
+
+def test_import_reuses_the_code_of_stock_received_by_transfer(api):
+    _client, db = api
+    origin, _ = create_node_with_key(db, "IMP3")
+    destination, _ = create_node_with_key(db, "IMP4")
+    product = Product(
+        product_code=_namespaced_code(origin, "P100"),
+        product_name="Basmati Rice 5kg",
+        tally_stock_item_name="Basmati Rice 5kg",
+        hsn="1006",
+        gst_rate=5,
+        unit="Nos",
+    )
+    db.add(product)
+    db.flush()
+    serial = Serial(serial_number="SQR-TRANSFERRED-1", product_id=product.id, status="IN_STOCK")
+    db.add(serial)
+    db.flush()
+    db.add(
+        NetworkStock(
+            serial_id=serial.id,
+            current_franchise_id=destination.id,
+            origin_franchise_id=origin.id,
+            status="IN_STOCK",
+        )
+    )
+    db.commit()
+
+    summary = import_tally_products(db, nodes=[destination], items=[stock_item(alias="RICE5")])
+    db.commit()
+
+    assert summary.created == 1
+    assert db.scalar(
+        select(Product.id).where(Product.product_code == _namespaced_code(destination, "P100"))
+    )
+    command = db.scalar(select(NodeCommand).where(NodeCommand.target_franchise_id == destination.id))
+    assert json.loads(command.payload_json)["product"]["product_code"] == "P100"
 
 
 def test_product_commands_wait_until_lite_declares_support(api):

@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import LoginAudit
 from app.security import create_session_token, hash_password, verify_password
+from app.services.node_auth import is_node_service_user
 from app.templates import templates
 
 router = APIRouter()
@@ -71,7 +72,7 @@ def login(
         )
 
     user = get_user_by_username(db, normalized)
-    if user and user.active:
+    if user and user.active and not is_node_service_user(db, user):
         ok = verify_password(password, user.password_hash)
     else:
         verify_password(password, _DUMMY_PASSWORD_HASH)

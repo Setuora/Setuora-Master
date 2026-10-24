@@ -58,8 +58,12 @@ def get_or_create_franchise_product(
     name = product_name.strip()
     tally_name = tally_stock_item_name.strip() or name
     unit = unit.strip()
-    if not name or len(name) > 180 or not tally_name or len(tally_name) > 180:
-        raise ValueError("A new product needs a name and Tally item name of 180 characters or fewer.")
+    if not name:
+        raise ValueError(
+            f"{local_code} is not on Master yet. Enter its product details to create it."
+        )
+    if len(name) > 180 or len(tally_name) > 180:
+        raise ValueError("Product name and Tally item name must be 180 characters or fewer.")
     if not unit or len(unit) > 40 or len(hsn.strip()) > 40:
         raise ValueError("Unit and HSN are too long or missing.")
     if (

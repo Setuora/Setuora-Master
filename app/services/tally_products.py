@@ -15,7 +15,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import FranchiseNode, Product, ProductIdentityHistory, utc_now
+from app.models import (
+    FranchiseNode,
+    NetworkStock,
+    Product,
+    ProductIdentityHistory,
+    Serial,
+    utc_now,
+)
 from app.services.network_ingest import (
     PRODUCT_UPSERT_COMMAND,
     _namespaced_code,
@@ -86,6 +93,29 @@ def _local_code(node: FranchiseNode, product: Product) -> str:
     return product.product_code[len(prefix) :]
 
 
+def _held_local_codes(db: Session, node: FranchiseNode) -> dict[str, str]:
+    """Local codes of products this franchise holds only through transfers.
+
+    A transferred unit keeps its origin's product code on the receiving Lite, so
+    reusing that code makes an import update the Lite product instead of
+    duplicating it.
+    """
+
+    rows = db.execute(
+        select(Product.tally_stock_item_name, Product.product_code)
+        .join(Serial, Serial.product_id == Product.id)
+        .join(NetworkStock, NetworkStock.serial_id == Serial.id)
+        .where(NetworkStock.current_franchise_id == node.id)
+        .order_by(Product.id)
+    ).all()
+    held: dict[str, str] = {}
+    for tally_name, product_code in rows:
+        local_code = product_code.split(":", 1)[-1]
+        if tally_name and len(local_code) <= MAX_LOCAL_CODE_LENGTH:
+            held.setdefault(tally_name.casefold(), local_code)
+    return held
+
+
 def queue_product_upsert(db: Session, node: FranchiseNode, product: Product) -> None:
     queue_node_command(
         db,
@@ -128,11 +158,14 @@ def import_tally_products(
             product.tally_stock_item_name.casefold(): product for product in node_products
         }
         by_code = {product.product_code: product for product in node_products}
+        held_codes = _held_local_codes(db, node)
         for item in items:
             if import_blocker(item):
                 skipped += 1
                 continue
-            code = _namespaced_code(node, suggest_product_code(item))
+            code = _namespaced_code(
+                node, held_codes.get(item.name.casefold()) or suggest_product_code(item)
+            )
             product = by_code.get(code) or by_tally_name.get(item.name.casefold())
             if product is not None:
                 # Link a product created by hand or an earlier import so live

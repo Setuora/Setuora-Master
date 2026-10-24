@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Control plane</p>
     <h1>Franchise network</h1>
     <p class="muted">Central franchise monitoring and Tally synchronization state.</p>
   </div>
@@ -16,15 +15,15 @@
   <article class="metric"><span>Active franchises</span><strong>{{ counts.franchises }}</strong></article>
   <article class="metric"><span>Online now</span><strong>{{ counts.online }}</strong></article>
   <article class="metric"><span>In stock</span><strong>{{ counts.in_stock }}</strong></article>
-  <article class="metric warn"><span>In transit</span><strong>{{ counts.in_transit }}</strong></article>
-  <article class="metric warn"><span>Pending Tally</span><strong>{{ counts.pending_tally }}</strong></article>
-  <article class="metric danger"><span>Failed Tally</span><strong>{{ counts.failed_tally }}</strong></article>
-  <article class="metric warn"><span>Open transfers</span><strong>{{ counts.open_transfers }}</strong></article>
+  <article class="metric"><span>In transit</span><strong>{{ counts.in_transit }}</strong></article>
+  <article class="metric{{ ' warn' if counts.pending_tally }}" data-tone="warn"><span>Pending Tally</span><strong>{{ counts.pending_tally }}</strong></article>
+  <article class="metric{{ ' danger' if counts.failed_tally }}" data-tone="danger"><span>Failed Tally</span><strong>{{ counts.failed_tally }}</strong></article>
+  <article class="metric{{ ' warn' if counts.open_transfers }}" data-tone="warn"><span>Open transfers</span><strong>{{ counts.open_transfers }}</strong></article>
 </section>
 
 <section class="panel">
   <div class="section-title">
-    <div><p class="eyebrow">Node health</p><h2>Franchises</h2></div>
+    <div><h2>Franchises</h2></div>
     <span>Offline threshold is configured on Master.</span>
   </div>
   <div class="table-scroll">
@@ -35,7 +34,7 @@
         <tr>
           <td class="cell-wrap"><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
           <td class="cell-wrap">{{ node.location }}</td>
-          <td><span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Online' if online_by_id[node.id] else 'Offline' }}</span></td>
+          <td><span class="status {{ 'synced' if online_by_id[node.id] else 'offline' }}">{{ 'Online' if online_by_id[node.id] else 'Offline' }}</span></td>
           <td class="numeric">{{ node.last_sequence }}</td>
           <td class="cell-date">{{ node.last_seen_at|report_date if node.last_seen_at else 'Never' }}</td>
           <td class="numeric">{{ stock_count }}</td>
@@ -59,7 +58,7 @@
           <tr>
             <td class="cell-date">{{ event.occurred_at|report_date }}</td>
             <td>{{ event.franchise.code }}</td>
-            <td>{% if has_role(user, 'super_admin', 'admin') %}<a href="/network/events/{{ event.event_id }}">{{ event.event_type|replace('_', ' ')|title }}</a>{% else %}{{ event.event_type|replace('_', ' ')|title }}{% endif %}</td>
+            <td>{% if has_role(user, 'super_admin', 'admin') %}<a href="/network/events/{{ event.event_id }}">{{ event.event_type|status_label }}</a>{% else %}{{ event.event_type|status_label }}{% endif %}</td>
             <td class="cell-wrap">{{ event.reference or '—' }}</td>
           </tr>
           {% else %}
@@ -80,7 +79,7 @@
           <tr>
             <td class="cell-wrap"><a href="/network/transfers/{{ transfer.public_id }}">{{ transfer.reference }}</a></td>
             <td>{{ transfer.source_franchise.code }} → {{ transfer.destination_franchise.code }}</td>
-            <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></td>
+            <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|status_label }}</span></td>
             <td class="numeric">{{ transfer.items|length }}</td>
           </tr>
           {% else %}

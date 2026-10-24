@@ -2,7 +2,7 @@
 {% block title %}Movements - Setuora Master{% endblock %}
 {% block content %}
 <section class="page-head">
-  <div><p class="eyebrow">Append-only journal</p><h1>Stock movements</h1></div>
+  <div><h1>Stock movements</h1></div>
 </section>
 
 <section class="panel">
@@ -14,7 +14,7 @@
     </label>
     <label>Event
       <select name="event_type"><option value="">All movements</option>
-        {% for value in event_types %}<option value="{{ value }}" {{ 'selected' if filters.event_type == value else '' }}>{{ value|replace('_', ' ')|title }}</option>{% endfor %}
+        {% for value in event_types %}<option value="{{ value }}" {{ 'selected' if filters.event_type == value else '' }}>{{ value|status_label }}</option>{% endfor %}
       </select>
     </label>
     <label>Search<input name="q" value="{{ filters.q }}" placeholder="Serial, reference, event ID"></label>
@@ -33,10 +33,10 @@
         <tr>
           <td class="cell-date">{{ event.occurred_at|report_date }}</td>
           <td><strong>{{ event.franchise.code }}</strong><small>#{{ event.sequence }}</small></td>
-          <td><a href="/network/events/{{ event.event_id }}">{{ event.event_type|replace('_', ' ')|title }}</a></td>
+          <td><a href="/network/events/{{ event.event_id }}">{{ event.event_type|status_label }}</a></td>
           <td class="cell-wrap">{{ event.reference or '—' }}</td>
           <td class="cell-wrap">{{ event.actor or 'System' }}</td>
-          <td>{% if event.tally_batch %}<span class="status {{ event.tally_batch.status|lower }}">{{ event.tally_batch.status|replace('_', ' ')|title }}</span>{% else %}Not applicable{% endif %}</td>
+          <td>{% if event.tally_batch %}<span class="status {{ event.tally_batch.status|lower }}">{{ event.tally_batch.status|status_label }}</span>{% else %}Not applicable{% endif %}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="empty">No movements match these filters.</td></tr>

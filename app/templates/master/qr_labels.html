@@ -9,7 +9,7 @@
   .qr-label strong { display: block; font-size: 8pt; }
   @media print { .global-nav, .page-head, .label-actions, .profile-menu, .nav-menu { display: none !important; } .page { padding: 0 !important; margin: 0 !important; max-width: none !important; } .qr-label-grid { margin: 0; gap: 0; } .qr-label { border: 0; } @page { size: A4; margin: 4mm; } }
 </style>
-<section class="page-head"><div><p class="eyebrow">{{ node.code }} · part {{ payload.part_number }} of {{ payload.part_count }}</p><h1>QR labels</h1><p class="muted">{{ payload.product.product_name }} · page {{ page }} of {{ page_count }}</p></div></section>
+<section class="page-head"><div><h1>QR labels</h1><p class="page-meta">{{ node.code }} · part {{ payload.part_number }} of {{ payload.part_count }}</p><p class="muted">{{ payload.product.product_name }} · page {{ page }} of {{ page_count }}</p></div></section>
 <div class="actions label-actions"><button class="button primary" type="button" data-print-page>Print this page</button><a class="button" href="/franchises/{{ node.public_id }}/qr">Back to allocations</a>{% if page > 1 %}<a class="button" href="?page={{ page - 1 }}">Previous</a>{% endif %}{% if page < page_count %}<a class="button" href="?page={{ page + 1 }}">Next</a>{% endif %}</div>
 <div class="qr-label-grid">
   {% for serial in serials %}

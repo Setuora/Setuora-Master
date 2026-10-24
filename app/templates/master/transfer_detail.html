@@ -2,13 +2,13 @@
 {% block title %}Transfer {{ transfer.reference }} - Setuora Master{% endblock %}
 {% block content %}
 <section class="page-head">
-  <div><p class="eyebrow">{{ transfer.source_franchise.code }} → {{ transfer.destination_franchise.code }}</p><h1>{{ transfer.reference }}</h1></div>
+  <div><h1>{{ transfer.reference }}</h1><p class="page-meta">{{ transfer.source_franchise.code }} → {{ transfer.destination_franchise.code }}</p></div>
   <a class="button" href="/network/transfers">Back to transfers</a>
 </section>
 <section class="panel">
   <dl class="details">
     <dt>Transfer ID</dt><dd class="cell-code">{{ transfer.public_id }}</dd>
-    <dt>Status</dt><dd><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></dd>
+    <dt>Status</dt><dd><span class="status {{ transfer.status|lower }}">{{ transfer.status|status_label }}</span></dd>
     <dt>Dispatched</dt><dd>{{ transfer.created_at|report_date }}</dd>
     <dt>Fully received</dt><dd>{{ transfer.received_at|report_date if transfer.received_at else 'Not yet' }}</dd>
   </dl>

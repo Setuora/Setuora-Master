@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Transfers - Setuora Master{% endblock %}
 {% block content %}
-<section class="page-head"><div><p class="eyebrow">Franchise network</p><h1>Stock transfers</h1><p class="muted">Ownership moves only when the destination Lite node acknowledges receipt.</p></div></section>
+<section class="page-head"><div><h1>Stock transfers</h1><p class="muted">Ownership moves only when the destination Lite node acknowledges receipt.</p></div></section>
 <section class="panel">
   <form method="get" class="filters">
     <label>Franchise<select name="franchise"><option value="">All franchises</option>{% for node in franchises %}<option value="{{ node.code }}" {{ 'selected' if filters.franchise == node.code else '' }}>{{ node.code }} · {{ node.name }}</option>{% endfor %}</select></label>
-    <label>Status<select name="transfer_status"><option value="">All statuses</option>{% for value in statuses %}<option value="{{ value }}" {{ 'selected' if filters.status == value else '' }}>{{ value|replace('_', ' ')|title }}</option>{% endfor %}</select></label>
+    <label>Status<select name="transfer_status"><option value="">All statuses</option>{% for value in statuses %}<option value="{{ value }}" {{ 'selected' if filters.status == value else '' }}>{{ value|status_label }}</option>{% endfor %}</select></label>
     <div class="filter-actions"><button class="button primary" type="submit">Filter</button><a class="button ghost" href="/network/transfers">Reset</a></div>
   </form>
 </section>
@@ -21,7 +21,7 @@
           <td>{{ transfer.source_franchise.code }}</td>
           <td>{{ transfer.destination_franchise.code }}</td>
           <td class="cell-date">{{ transfer.created_at|report_date }}</td>
-          <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|replace('_', ' ')|title }}</span></td>
+          <td><span class="status {{ transfer.status|lower }}">{{ transfer.status|status_label }}</span></td>
           <td class="numeric">{{ received }} / {{ transfer.items|length }}</td>
         </tr>
         {% else %}

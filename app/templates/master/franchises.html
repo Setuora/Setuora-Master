@@ -3,7 +3,6 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <p class="eyebrow">Setuora Master</p>
     <h1>Franchises</h1>
     <p class="muted">Add a franchise here, copy its connection details, then paste them into Lite. Each franchise gets its own node credential. Tally stays on Master.</p>
   </div>
@@ -62,7 +61,7 @@
           <td class="cell-wrap"><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
           <td class="cell-wrap">{{ node.location }}</td>
           <td>
-            <span class="status {{ 'synced' if online_by_id[node.id] else 'failed' }}">{{ 'Recent' if online_by_id[node.id] else 'Waiting' }}</span>
+            <span class="status {{ 'synced' if online_by_id[node.id] else 'waiting' }}">{{ 'Recent' if online_by_id[node.id] else 'Waiting' }}</span>
             <small class="cell-date">{{ node.last_seen_at|report_date if node.last_seen_at else 'Waiting for Lite to connect' }}</small>
           </td>
           <td class="numeric">{{ node.last_sequence }}</td>

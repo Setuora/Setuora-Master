@@ -1366,23 +1366,24 @@ details.add-company > summary {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   min-height: 32px;
   cursor: pointer;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0;
-  color: var(--primary);
+  color: var(--primary-active);
   list-style: none;
 }
 details.add-company > summary::-webkit-details-marker {
   display: none;
 }
 details.add-company > summary::before {
-  content: "+ ";
+  content: "+";
   font-weight: 700;
 }
 details.add-company[open] > summary::before {
-  content: "− ";
+  content: "−";
 }
 details.add-company[open] > summary {
   margin-bottom: 16px;
@@ -2436,7 +2437,7 @@ small {
 
 .checklist div {
   padding-left: 14px;
-  border-left: 3px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
 }
 
 .details {

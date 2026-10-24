@@ -151,7 +151,7 @@ def test_user_creation_accepts_multiple_master_roles():
     assert dual is not None
     assert dual.role == "admin,directors"
     assert dual.must_change_password is True
-    assert "admin, directors" in after_page.body.decode()
+    assert "Admin, Directors" in after_page.body.decode()
 
 
 def test_user_delete_is_super_admin_only_and_archives_history_user():

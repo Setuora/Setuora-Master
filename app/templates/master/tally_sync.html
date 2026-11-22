@@ -37,10 +37,14 @@
       <dt>Schedule</dt><dd>{{ 'Off' if sync_minutes == 0 else 'Every ' ~ sync_minutes ~ ' minute' ~ ('' if sync_minutes == 1 else 's') }}</dd>
       <dt>Last run</dt><dd>{{ last_sync_at|report_date if last_sync_at else 'Not run yet' }}</dd>
       <dt>Result</dt><dd>{{ last_sync_result or 'Not run yet' }}</dd>
+      <dt>Godown stock check</dt><dd>{{ 'Off' if godown_minutes == 0 else 'Every ' ~ godown_minutes ~ ' minute' ~ ('' if godown_minutes == 1 else 's') }}</dd>
+      <dt>Last check</dt><dd>{{ godown_last_at|report_date if godown_last_at else 'Not run yet' }}</dd>
+      <dt>Check result</dt><dd>{{ godown_last_result or 'Not run yet' }}</dd>
     </dl>
     <form method="post" action="/tally-sync/schedule" class="grid-form">
       <label>Sync every (minutes)<input name="sync_minutes" type="number" min="0" max="{{ max_sync_minutes }}" value="{{ sync_minutes }}" required><small>0 turns auto sync off.</small></label>
       <label>Days to look back<input name="sync_days" type="number" min="1" max="{{ max_sync_days }}" value="{{ sync_days }}" required><small>Auto sync reads receipts dated in this many past days.</small></label>
+      <label>Check godown stock every (minutes)<input name="godown_minutes" type="number" min="0" max="{{ max_godown_minutes }}" value="{{ godown_minutes }}" required><small>New stock booked into a franchise's Tally godown gets QR labels automatically, after its first Load from Tally. 0 turns it off.</small></label>
       <div class="span-all"><button class="button" type="submit">Save schedule</button></div>
     </form>
   </details>

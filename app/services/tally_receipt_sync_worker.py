@@ -6,6 +6,7 @@ from contextlib import suppress
 
 from fastapi import FastAPI
 
+from app.services.tally_godown_qr import run_godown_auto_sync
 from app.services.tally_masters import TallyDataError
 from app.services.tally_receipts import run_scheduled_receipt_sync
 
@@ -29,6 +30,15 @@ async def tally_receipt_sync_worker_loop() -> None:
             logger.warning("Tally receipt auto sync failed: %s", exc)
         except Exception:
             logger.exception("Tally receipt auto sync failed")
+        try:
+            # New stock booked into a franchise's Tally godown becomes its QR stock.
+            result = await asyncio.to_thread(run_godown_auto_sync)
+            if result:
+                logger.info("Tally godown auto sync %s", result)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Tally godown auto sync failed")
 
 
 def start_tally_receipt_sync_worker(app: FastAPI) -> None:

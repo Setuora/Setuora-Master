@@ -262,9 +262,11 @@ def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(deploy.sys, "platform", "win32")
     monkeypatch.setattr(deploy, "_run", lambda command: calls.append(command))
+    monkeypatch.setattr(deploy.getpass, "getuser", lambda: "owner")
     deploy._secure_private_storage()
 
-    for index, directory in enumerate((tmp_path / "data", tmp_path / "logs")):
+    status = tmp_path / "status"
+    for index, directory in enumerate((tmp_path / "data", tmp_path / "logs", status)):
         commands = calls[index * 4 : (index + 1) * 4]
         assert all(command[:2] == ["icacls.exe", str(directory)] for command in commands)
         assert all("/T" in command for command in commands)
@@ -276,6 +278,9 @@ def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
         assert "/inheritance:r" in commands[2]
         assert commands[3][2] == "/remove:g"
         assert {"*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"}.issubset(commands[3])
+    # Only the setup admin, not every local user, can read the Sync Monitor status.
+    assert calls[12] == ["icacls.exe", str(status), "/grant", "owner:(OI)(CI)RX", "/T"]
+    assert len(calls) == 13
 
 
 def test_start_updates_source_after_backup_and_stop_then_runs_setup():

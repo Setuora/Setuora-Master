@@ -774,3 +774,21 @@ def test_invalid_replacement_is_atomic(
     )
     db_session.refresh(node)
     assert node.last_sequence == 1
+
+
+def test_node_api_refuses_lan_clients_but_accepts_tailnet_and_loopback():
+    from fastapi.testclient import TestClient as _Client
+
+    app = FastAPI()
+    app.add_middleware(NodeAPIBodyLimitMiddleware)
+    app.include_router(node_api_router)
+
+    def status(host: str) -> tuple[int, str]:
+        with _Client(app, client=(host, 50000)) as client:
+            response = client.get("/api/v1/node")
+        return response.status_code, response.json().get("error", {}).get("code", "")
+
+    assert status("192.168.1.50") == (403, "TAILSCALE_REQUIRED")
+    # Tailnet (Tailscale Serve forwards the peer) and loopback reach authentication.
+    assert status("100.118.77.87")[0] == 401
+    assert status("127.0.0.1")[0] == 401

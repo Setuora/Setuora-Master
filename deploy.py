@@ -485,10 +485,12 @@ def _prepare_environment() -> None:
 
 
 def _secure_private_storage() -> None:
-    """Keep the local database, backups, and logs readable only by the service and admins."""
+    """Keep the database, backups, logs and sync status readable only by the service and admins."""
     if sys.platform != "win32":
         return
-    for directory in (PROJECT_ROOT / "data", PROJECT_ROOT / "logs"):
+    status = PROJECT_ROOT / "status"
+    status.mkdir(parents=True, exist_ok=True)
+    for directory in (PROJECT_ROOT / "data", PROJECT_ROOT / "logs", status):
         _run(["icacls.exe", str(directory), "/grant", "*S-1-5-18:F", "*S-1-5-32-544:F", "/T"])
         _run(
             [
@@ -512,6 +514,9 @@ def _secure_private_storage() -> None:
                 "/T",
             ]
         )
+    # The Sync Monitor runs unelevated as the admin who set up Master, and
+    # UAC hides that admin's Administrators membership from it.
+    _run(["icacls.exe", str(status), "/grant", f"{getpass.getuser()}:(OI)(CI)RX", "/T"])
 
 
 def _venv_python() -> Path:
@@ -1181,6 +1186,8 @@ def setup(_args: argparse.Namespace) -> None:
 def start(_args: argparse.Namespace) -> None:
     _check_windows()
     preflight(_args)
+    # Also protects folders that installs made before a release added them.
+    _secure_private_storage()
     task = _task("/Query", "/TN", TASK_NAME, check=False, capture=True)
     if task.returncode != 0:
         raise DeploymentError("The Setuora background task is missing. Choose Start to repair it.")
@@ -1324,6 +1331,11 @@ def _set_lan_access(args: argparse.Namespace, enabled: bool) -> None:
     _write_env({LAN_SETTING: "true" if enabled else "false"})
     if enabled:
         print("LAN access turned on. Restarting Setuora Master...")
+        print(
+            "Warning: other PCs open Master over plain HTTP, so sign-in passwords cross the "
+            "local network unencrypted. Use it only on a trusted office network. "
+            "Lite still connects only through Tailscale HTTPS."
+        )
     else:
         print("LAN access turned off. Restarting Setuora Master for this computer only...")
     start(args)

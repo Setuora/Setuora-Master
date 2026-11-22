@@ -414,3 +414,78 @@ def test_products_pages_import_ticked_items_for_ticked_franchises(api, monkeypat
     assert "Live sync runs every 45 minutes." in saved.text
     rejected = client.post("/network/products/sync-settings", data={"sync_minutes": "-1"})
     assert "Live sync interval must be 0 to 1440 minutes." in rejected.text
+
+
+MRP_ITEM_XML = """
+<ENVELOPE><BODY><DATA><COLLECTION>
+  <STOCKITEM NAME="SG CHILLIPOWDER GOLD 100GRM">
+    <GUID>guid-chilli</GUID>
+    <BASEUNITS>PCS</BASEUNITS>
+    <GSTDETAILS.LIST>
+      <APPLICABLEFROM>20170701</APPLICABLEFROM>
+      <STATEWISEDETAILS.LIST>
+        <RATEDETAILS.LIST><GSTRATEDUTYHEAD>Integrated Tax</GSTRATEDUTYHEAD><GSTRATE> 5</GSTRATE></RATEDETAILS.LIST>
+      </STATEWISEDETAILS.LIST>
+    </GSTDETAILS.LIST>
+    <STANDARDPRICELIST.LIST></STANDARDPRICELIST.LIST>
+    <MRPDETAILS.LIST><FROMDATE>20220401</FROMDATE>
+      <MRPRATEDETAILS.LIST><STATENAME>Any</STATENAME><MRPRATE>60.00/PCS</MRPRATE></MRPRATEDETAILS.LIST>
+    </MRPDETAILS.LIST>
+    <MRPDETAILS.LIST><FROMDATE>20230401</FROMDATE>
+      <MRPRATEDETAILS.LIST><STATENAME>Any</STATENAME><MRPRATE>65.00/PCS</MRPRATE></MRPRATEDETAILS.LIST>
+    </MRPDETAILS.LIST>
+  </STOCKITEM>
+</COLLECTION></DATA></BODY></ENVELOPE>
+"""
+
+
+def test_stock_item_without_standard_price_uses_latest_mrp(monkeypatch):
+    monkeypatch.setattr(
+        tally_masters,
+        "_post_read_request",
+        lambda settings, xml, *, timeout=8: (xml, ET.fromstring(MRP_ITEM_XML)),
+    )
+
+    (chilli,) = tally_masters.fetch_tally_stock_items({}, "Central Co")
+
+    # Setuora sale rates include GST, so the MRP is used as-is (65.00 = 61.90 + 5% GST).
+    assert chilli.standard_rate == 65.0
+    assert "<NATIVEMETHOD>MRPDetails</NATIVEMETHOD>" in tally_masters.build_stock_item_list_xml("Central Co")
+
+
+def test_live_sync_fills_only_missing_prices_without_identity_history(db_session):
+    db_session.add_all(
+        [
+            Product(
+                product_code="F1:RICE5",
+                product_name="Basmati Rice 5kg",
+                tally_stock_item_name="Basmati Rice 5kg",
+                hsn="1006",
+                gst_rate=5,
+                unit="Nos",
+                default_rate=0,
+                tally_synced_at=utc_now(),
+            ),
+            Product(
+                product_code="F1:DAL",
+                product_name="Dal",
+                tally_stock_item_name="Dal",
+                hsn="1006",
+                gst_rate=5,
+                unit="Nos",
+                default_rate=99,
+                tally_synced_at=utc_now(),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    summary = apply_tally_stock_items(
+        db_session,
+        [stock_item(standard_rate=61.9), stock_item("Dal", guid="guid-dal", standard_rate=50)],
+    )
+
+    rates = dict(db_session.execute(select(Product.product_code, Product.default_rate)).all())
+    assert rates == {"F1:RICE5": 61.9, "F1:DAL": 99}
+    assert summary.updated == 1
+    assert db_session.scalars(select(ProductIdentityHistory)).all() == []

@@ -324,6 +324,7 @@ def build_stock_item_list_xml(company_name: str) -> str:
             "GSTDetails",
             "HSNDetails",
             "StandardPriceList",
+            "MRPDetails",
         ),
         company_name=company_name.strip(),
     )
@@ -501,6 +502,20 @@ def _stock_item_standard_rate(item: ET.Element) -> float | None:
     return _tally_number(_direct_text(entry, "RATE")) if entry is not None else None
 
 
+def _stock_item_mrp(item: ET.Element) -> float | None:
+    """The item's latest MRP. It includes GST, like Setuora's sale rates."""
+
+    entry = _latest_entry(item, "MRPDETAILS.LIST", "FROMDATE")
+    if entry is None:
+        return None
+    for detail in entry.iter():
+        if _local_tag(detail) == "MRPRATEDETAILS.LIST":
+            mrp = _tally_number(_direct_text(detail, "MRPRATE"))
+            if mrp:
+                return mrp
+    return None
+
+
 def _stock_item_alias(item: ET.Element, name: str) -> str:
     for node in item.iter():
         if _local_tag(node) != "NAME.LIST":
@@ -537,7 +552,8 @@ def fetch_tally_stock_items(settings: dict[str, str], company_name: str) -> list
                 unit=_direct_text(node, "BASEUNITS"),
                 hsn=_stock_item_hsn(node),
                 gst_rate=_stock_item_gst_rate(node),
-                standard_rate=_stock_item_standard_rate(node),
+                # Most items have only an MRP; it is the price franchises sell at.
+                standard_rate=_stock_item_standard_rate(node) or _stock_item_mrp(node),
                 alias=_stock_item_alias(node, name),
             )
         )

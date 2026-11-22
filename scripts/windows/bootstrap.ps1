@@ -223,7 +223,7 @@ try {
     Write-Host ''
     $portFile = Join-Path $InstallRoot 'runtime-port.txt'
     $port = if (Test-Path -LiteralPath $portFile) { (Get-Content -LiteralPath $portFile -TotalCount 1).Trim() } else { '8000' }
-    Write-Host "Setuora Master is ready at http://127.0.0.1:$port" -ForegroundColor Green
+    Write-Host "Setuora Master is ready. Local address (this computer only): http://127.0.0.1:$port" -ForegroundColor Green
     Write-Host "For later controls, open $(Join-Path $InstallRoot 'setuora.bat')."
     exit 0
 } catch {

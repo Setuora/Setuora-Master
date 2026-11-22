@@ -233,21 +233,26 @@ def apply_tally_stock_items(db: Session, items: list[TallyStockItem]) -> SyncSum
         )
         product.tally_guid = product.tally_guid or item.guid or None
         product.tally_synced_at = now
-        if not changed:
-            continue
-        db.add(
-            ProductIdentityHistory(
-                product_id=product.id,
-                product_name=product.product_name,
-                tally_stock_item_name=product.tally_stock_item_name,
-                hsn=product.hsn,
-                unit=product.unit,
-                gst_rate=float(product.gst_rate or 0),
-                replaced_at=now,
+        # Fill a missing price from Tally; a price set in Setuora is never overwritten.
+        price_filled = not product.default_rate and bool(item.standard_rate)
+        if price_filled:
+            product.default_rate = item.standard_rate
+        if changed:
+            db.add(
+                ProductIdentityHistory(
+                    product_id=product.id,
+                    product_name=product.product_name,
+                    tally_stock_item_name=product.tally_stock_item_name,
+                    hsn=product.hsn,
+                    unit=product.unit,
+                    gst_rate=float(product.gst_rate or 0),
+                    replaced_at=now,
+                )
             )
-        )
-        for field, value in target.items():
-            setattr(product, field, value)
+            for field, value in target.items():
+                setattr(product, field, value)
+        elif not price_filled:
+            continue
         node = nodes.get(product.product_code.split(":", 1)[0])
         if node is not None:
             queue_product_upsert(db, node, product)

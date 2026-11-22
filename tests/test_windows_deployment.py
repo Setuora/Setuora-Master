@@ -1,8 +1,21 @@
 from pathlib import Path
 
+import pytest
+
 import deploy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_lan_and_summary(monkeypatch, tmp_path):
+    # Keep tests off the real firewall, network and Tally; tests that need these override them.
+    monkeypatch.setattr(deploy, "LAN_STATE_PATH", tmp_path / "runtime-lan.txt")
+    monkeypatch.setattr(deploy, "_powershell_json", lambda _script: [])
+    monkeypatch.setattr(deploy, "_remove_lan_firewall_rule", lambda: None)
+    monkeypatch.setattr(deploy, "_apply_lan_access", lambda: None)
+    monkeypatch.setattr(deploy, "_tailscale_ipv4", lambda: "")
+    monkeypatch.setattr(deploy, "_tally_gateway_state", lambda: "unknown")
 
 
 def test_active_deployment_is_windows_native_with_private_tailscale_serve():
@@ -105,6 +118,50 @@ def test_production_preflight_rejects_legacy_sftp_and_requires_loopback_console(
     assert "SFTP_SYNC_ENABLED must be false for the central-Tally deployment." in issues
 
 
+def test_setup_prints_local_only_address_when_lan_access_is_disabled(monkeypatch, capsys):
+    monkeypatch.setattr(deploy, "_local_url", lambda: "http://127.0.0.1:8123")
+    monkeypatch.setattr(deploy, "_lan_enabled", lambda: False)
+
+    deploy._print_addresses()
+
+    output = capsys.readouterr().out
+    assert "Local address (this computer only): http://127.0.0.1:8123" in output
+    assert "LAN access is off" in output
+
+
+def test_startup_summary_shows_lite_address_ips_and_tally(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(deploy, "LAN_STATE_PATH", tmp_path / "runtime-lan.txt")
+    monkeypatch.setattr(deploy, "_lan_addresses", lambda: ["192.168.0.176"])
+    monkeypatch.setattr(deploy, "_tailscale_ipv4", lambda: "100.83.56.95")
+    monkeypatch.setattr(deploy, "_tally_gateway_state", lambda: "ok http://127.0.0.1:9000")
+
+    deploy._print_startup_summary(8000, "https://master.tailnet.ts.net")
+
+    output = capsys.readouterr().out
+    assert "Console (this PC)    : http://127.0.0.1:8000" in output
+    assert "LAN IP address       : 192.168.0.176" in output
+    assert "Tailscale IP         : 100.83.56.95" in output
+    assert "LITE MASTER ADDRESS  : https://master.tailnet.ts.net" in output
+    assert "Tally gateway        : answering at http://127.0.0.1:9000" in output
+
+
+def test_startup_summary_reports_unreachable_tally(monkeypatch, capsys, tmp_path):
+    state = tmp_path / "runtime-lan.txt"
+    state.write_text("true\n", encoding="ascii")
+    monkeypatch.setattr(deploy, "LAN_STATE_PATH", state)
+    monkeypatch.setattr(deploy, "_lan_addresses", lambda: ["192.168.0.176"])
+    monkeypatch.setattr(deploy, "_tailscale_ipv4", lambda: "")
+    monkeypatch.setattr(deploy, "_tally_gateway_state", lambda: "down http://127.0.0.1:9000")
+
+    deploy._print_startup_summary(8000, "")
+
+    output = capsys.readouterr().out
+    assert "Console (LAN PCs)    : http://192.168.0.176:8000" in output
+    assert "Tailscale IP         : not connected" in output
+    assert "unavailable (Tailscale offline)" in output
+    assert "NOT answering at http://127.0.0.1:9000" in output
+
+
 def test_batch_and_packaged_controls_share_safe_interactive_elevation():
     controller = (PROJECT_ROOT / "setuora.bat").read_text(encoding="utf-8")
     launcher = (PROJECT_ROOT / "client/windows/setuora.ps1").read_text(encoding="utf-8")
@@ -205,9 +262,11 @@ def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(deploy, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(deploy.sys, "platform", "win32")
     monkeypatch.setattr(deploy, "_run", lambda command: calls.append(command))
+    monkeypatch.setattr(deploy.getpass, "getuser", lambda: "owner")
     deploy._secure_private_storage()
 
-    for index, directory in enumerate((tmp_path / "data", tmp_path / "logs")):
+    status = tmp_path / "status"
+    for index, directory in enumerate((tmp_path / "data", tmp_path / "logs", status)):
         commands = calls[index * 4 : (index + 1) * 4]
         assert all(command[:2] == ["icacls.exe", str(directory)] for command in commands)
         assert all("/T" in command for command in commands)
@@ -219,6 +278,9 @@ def test_setup_restricts_existing_master_data_and_logs(monkeypatch, tmp_path):
         assert "/inheritance:r" in commands[2]
         assert commands[3][2] == "/remove:g"
         assert {"*S-1-1-0", "*S-1-5-11", "*S-1-5-32-545"}.issubset(commands[3])
+    # Only the setup admin, not every local user, can read the Sync Monitor status.
+    assert calls[12] == ["icacls.exe", str(status), "/grant", "owner:(OI)(CI)RX", "/T"]
+    assert len(calls) == 13
 
 
 def test_start_updates_source_after_backup_and_stop_then_runs_setup():
@@ -500,6 +562,7 @@ def test_setup_of_existing_master_tolerates_offline_tailscale(monkeypatch, capsy
     monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
     monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
     monkeypatch.setattr(deploy, "_local_url", lambda: "http://127.0.0.1:8000")
+    monkeypatch.setattr(deploy, "_print_startup_summary", lambda *args, **kwargs: None)
     monkeypatch.setattr(deploy, "_install_runtime", lambda: None)
     monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
     monkeypatch.setattr(deploy, "_wait_for_health", lambda: None)
@@ -997,6 +1060,7 @@ def test_setup_repair_stops_existing_task_before_replacing_runtime(monkeypatch):
     monkeypatch.setattr(deploy, "stop", lambda _: events.append("stop"))
     monkeypatch.setattr(deploy, "_select_available_web_port", lambda: 8000)
     monkeypatch.setattr(deploy, "_local_url", lambda: "http://127.0.0.1:8000")
+    monkeypatch.setattr(deploy, "_print_startup_summary", lambda *args, **kwargs: None)
     monkeypatch.setattr(deploy, "_install_runtime", lambda: events.append("install"))
     monkeypatch.setattr(deploy, "_ensure_task", lambda: None)
     monkeypatch.setattr(deploy, "_wait_for_health", lambda: events.append("healthy"))

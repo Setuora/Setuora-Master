@@ -1,3 +1,4 @@
+import ipaddress
 import secrets
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -40,8 +41,34 @@ def _node_api_error(
     )
 
 
+# Lite reaches the node API only through Tailscale Serve (a loopback proxy that
+# forwards the tailnet peer address) or a direct tailnet address.
+_TAILNET_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("fd7a:115c:a1e0::/48"),
+)
+
+
+def _node_api_peer_allowed(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True  # in-process clients such as tests have no network address
+    return address.is_loopback or any(address in network for network in _TAILNET_NETWORKS)
+
+
 class NodeAPIBodyLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/api/v1") and not _node_api_peer_allowed(request):
+            # With LAN access on, Master also listens on plain HTTP; node credentials
+            # must never travel that way.
+            return _node_api_error(
+                request,
+                status_code=403,
+                code="TAILSCALE_REQUIRED",
+                message="Connect Lite to Master through its private Tailscale HTTPS address.",
+            )
         if request.method == "POST" and request.url.path == "/api/v1/events":
             raw_length = request.headers.get("content-length")
             if raw_length is None:

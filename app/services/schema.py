@@ -57,6 +57,10 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
             connection.execute(
                 text("ALTER TABLE batches ADD COLUMN tally_stock_location VARCHAR(180)")
             )
+        if "tally_source_location" not in columns:
+            connection.execute(
+                text("ALTER TABLE batches ADD COLUMN tally_source_location VARCHAR(180)")
+            )
         if "sync_started_at" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN sync_started_at DATETIME"))
             connection.execute(
@@ -233,6 +237,20 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
                         "ON storage_locations (warehouse_level)"
                     )
                 )
+
+        if "franchise_nodes" in inspector.get_table_names():
+            node_columns = {
+                column["name"] for column in inspector.get_columns("franchise_nodes")
+            }
+            for column_name in (
+                "tally_receipt_voucher_type",
+                "tally_sales_voucher_type",
+                "tally_sales_return_voucher_type",
+            ):
+                if column_name not in node_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE franchise_nodes ADD COLUMN {column_name} VARCHAR(80)")
+                    )
 
         if target.dialect.name == "sqlite" and "stock_relocations" in inspector.get_table_names():
             for table_name in ("stock_relocations", "relocation_serials"):

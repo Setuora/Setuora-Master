@@ -38,6 +38,7 @@ from app.services.lite_connection import (
     normalize_master_url,
     validate_franchise_code,
 )
+from app.services.network_ingest import counts_as_franchise_stock
 from app.services.node_auth import (
     create_franchise_node,
     provision_node_credential,
@@ -56,7 +57,7 @@ FINANCIAL_EVENT_TYPES = {
     "PURCHASE_RETURN",
     "ISSUE",
 }
-TALLY_EVENT_TYPES = {"PURCHASE", "RECEIVE", "SALE", "SALES_RETURN"}
+TALLY_EVENT_TYPES = {"PURCHASE", "RECEIVE", "SALE", "SALES_RETURN", "TRANSFER_RECEIVED"}
 OPEN_TRANSFER_STATUSES = {
     TransferStatus.DRAFT.value,
     TransferStatus.DISPATCHED.value,
@@ -162,7 +163,7 @@ def master_dashboard(request: Request, db: Session = Depends(get_db)):
             NetworkStock,
             and_(
                 NetworkStock.current_franchise_id == FranchiseNode.id,
-                NetworkStock.status == "IN_STOCK",
+                counts_as_franchise_stock(),
             ),
         )
         .group_by(FranchiseNode.id)
@@ -172,7 +173,7 @@ def master_dashboard(request: Request, db: Session = Depends(get_db)):
         "franchises": sum(1 for node in nodes if node.active),
         "online": online_count,
         "in_stock": db.scalar(
-            select(func.count(NetworkStock.id)).where(NetworkStock.status == "IN_STOCK")
+            select(func.count(NetworkStock.id)).where(counts_as_franchise_stock())
         )
         or 0,
         "in_transit": db.scalar(
@@ -399,6 +400,52 @@ def create_franchise(
         user,
         api_key=provisioned.api_key,
         connection_node=node,
+    )
+
+
+@router.post("/franchises/{public_id}/tally")
+def save_franchise_tally_names(
+    request: Request,
+    public_id: str,
+    tally_godown_name: str = Form(""),
+    tally_receipt_voucher_type: str = Form(""),
+    tally_sales_voucher_type: str = Form(""),
+    tally_sales_return_voucher_type: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    node = db.scalar(select(FranchiseNode).where(FranchiseNode.public_id == public_id))
+    if node is None:
+        raise HTTPException(status_code=404, detail="Franchise not found")
+    godown = tally_godown_name.strip()
+    voucher_types = {
+        "tally_receipt_voucher_type": tally_receipt_voucher_type.strip(),
+        "tally_sales_voucher_type": tally_sales_voucher_type.strip(),
+        "tally_sales_return_voucher_type": tally_sales_return_voucher_type.strip(),
+    }
+    if len(godown) > 180 or any(len(value) > 80 for value in voucher_types.values()):
+        return _render_franchises_with_result(
+            request,
+            db,
+            user,
+            error="Tally godown must be 180 characters or fewer and voucher types 80 or fewer.",
+        )
+    if any('"' in value for value in (godown, *voucher_types.values())):
+        return _render_franchises_with_result(
+            request, db, user, error="Tally names cannot contain double quotes."
+        )
+    node.tally_godown_name = godown or None
+    for field_name, value in voucher_types.items():
+        setattr(node, field_name, value or None)
+    db.commit()
+    return _render_franchises_with_result(
+        request,
+        db,
+        user,
+        message=(
+            f"Saved Tally names for {node.code}. New vouchers use them; "
+            "vouchers already waiting keep the names they were created with."
+        ),
     )
 
 
@@ -676,7 +723,7 @@ def _movement_rows(
         select(NetworkStock.current_franchise_id, Product, func.count(NetworkStock.id))
         .join(Serial, NetworkStock.serial_id == Serial.id)
         .join(Product, Serial.product_id == Product.id)
-        .where(NetworkStock.status == "IN_STOCK")
+        .where(counts_as_franchise_stock())
         .group_by(NetworkStock.current_franchise_id, Product.id)
     )
     if selected_ids:

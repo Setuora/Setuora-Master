@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -39,6 +39,7 @@ from app.network_schemas import (
     NetworkEventV1,
 )
 from app.services.node_auth import ensure_node_service_user
+from app.services.settings import get_setting
 
 TALLY_EVENT_TYPES = {
     NetworkEventType.PURCHASE,
@@ -88,7 +89,32 @@ class NetworkIngestError(Exception):
 
 
 PRODUCT_UPSERT_COMMAND = "PRODUCT_UPSERT"
-OPT_IN_COMMAND_TYPES = frozenset({PRODUCT_UPSERT_COMMAND})
+# Product batch on QR codes created from a franchise's Tally godown stock.
+TALLY_OPENING_BATCH = "TALLY-OPENING"
+# Lite books stock in as a Purchase or a Receive; both post a Purchase to Tally.
+STOCK_IN_EVENT_TYPES = frozenset({NetworkEventType.PURCHASE, NetworkEventType.RECEIVE})
+
+
+def counts_as_franchise_stock():
+    """SQL condition for a NetworkStock row that counts as stock at its franchise.
+
+    Stock in Lite counts, and so does Tally godown stock issued as QR codes but not
+    yet booked in on Lite: Tally already holds it at the franchise.
+    """
+
+    return or_(
+        NetworkStock.status == SerialStatus.IN_STOCK.value,
+        and_(
+            NetworkStock.status == SerialStatus.GENERATED.value,
+            NetworkStock.serial_id.in_(
+                select(Serial.id).where(Serial.product_batch_number == TALLY_OPENING_BATCH)
+            ),
+        ),
+    )
+
+# Receipts read from central Tally, with the customer ledgers Lite bills against.
+TALLY_RECEIPTS_COMMAND = "TALLY_RECEIPTS"
+OPT_IN_COMMAND_TYPES = frozenset({PRODUCT_UPSERT_COMMAND, TALLY_RECEIPTS_COMMAND})
 
 
 def _canonical_json(value: Any) -> str:
@@ -781,6 +807,57 @@ def _batch_type(event_type: NetworkEventType) -> str:
     }[event_type]
 
 
+def _franchise_voucher_type(node: FranchiseNode, event_type: NetworkEventType) -> str | None:
+    if event_type == NetworkEventType.SALE:
+        return (node.tally_sales_voucher_type or "").strip() or None
+    if event_type == NetworkEventType.SALES_RETURN:
+        return (node.tally_sales_return_voucher_type or "").strip() or None
+    return None
+
+
+def _queue_transfer_stock_journal(
+    db: Session,
+    node: FranchiseNode,
+    inbound: InboundEvent,
+    event: NetworkEventV1,
+    transfer: StockTransfer,
+    received: list[tuple[Serial, NetworkEventItem]],
+) -> Batch | None:
+    """Queue a Tally Stock Journal moving the received items between franchise godowns."""
+    source_godown = (transfer.source_franchise.tally_godown_name or "").strip()
+    destination_godown = (node.tally_godown_name or "").strip()
+    if not received or not (source_godown or destination_godown):
+        # Neither franchise has its own godown, so Tally stock does not move.
+        return None
+    default_godown = get_setting(db, "tally_stock_location", "").strip() or "Main Location"
+    source_godown = source_godown or default_godown
+    destination_godown = destination_godown or default_godown
+    if source_godown.casefold() == destination_godown.casefold():
+        return None
+    service_user = ensure_node_service_user(db, node)
+    batch = Batch(
+        batch_number=_batch_number(node, event),
+        batch_type=BatchType.STOCK_TRANSFER.value,
+        user_id=service_user.id,
+        status=BatchStatus.PENDING_SYNC.value,
+        tally_reference=transfer.reference,
+        notes=(
+            f"Transfer {transfer.reference} from {transfer.source_franchise.code} "
+            f"received by {node.code}; inbound event {_event_id(event)}"
+        ),
+        sync_remote_id=_event_id(event),
+        tally_source_location=source_godown,
+        tally_stock_location=destination_godown,
+        submitted_at=event.occurred_at,
+    )
+    db.add(batch)
+    db.flush()
+    inbound.tally_batch_id = batch.id
+    for serial, item in received:
+        db.add(BatchItem(batch_id=batch.id, serial_id=serial.id, quantity=1, rate=item.rate))
+    return batch
+
+
 def _inventory_event(
     db: Session,
     node: FranchiseNode,
@@ -811,14 +888,24 @@ def _inventory_event(
         notes=f"Mirrored from franchise {node.code}; inbound event {_event_id(event)}",
         sync_remote_id=_event_id(event),
         tally_stock_location=node.tally_godown_name,
+        tally_voucher_type=_franchise_voucher_type(node, event.type),
         submitted_at=event.occurred_at,
     )
     db.add(batch)
     db.flush()
     inbound.tally_batch_id = batch.id
 
+    opening_pieces = 0
     for item in event.items:
         serial, stock = _find_serial_and_stock(db, item.serial_number)
+        is_opening = (
+            event.type in STOCK_IN_EVENT_TYPES
+            and serial is not None
+            and stock is not None
+            and stock.status == SerialStatus.GENERATED.value
+            and serial.product_batch_number == TALLY_OPENING_BATCH
+        )
+        opening_pieces += is_opening
         if serial is None:
             raise NetworkIngestError(
                 409,
@@ -861,15 +948,17 @@ def _inventory_event(
         stock.last_event_id = inbound.id
         _update_serial_snapshot(serial, node, item)
 
-        db.add(
-            BatchItem(
-                batch_id=batch.id,
-                serial_id=serial.id,
-                quantity=1,
-                rate=item.rate,
-                sales_discount_rate=item.sales_discount_rate,
+        if not is_opening:
+            # Tally opening stock is already in Tally; only new pieces go on the Purchase.
+            db.add(
+                BatchItem(
+                    batch_id=batch.id,
+                    serial_id=serial.id,
+                    quantity=1,
+                    rate=item.rate,
+                    sales_discount_rate=item.sales_discount_rate,
+                )
             )
-        )
         db.add(
             InventoryTransaction(
                 transaction_type=transaction_type,
@@ -886,6 +975,22 @@ def _inventory_event(
                 notes=f"Franchise {node.code}; actor {event.actor or 'unknown'}",
                 created_at=event.occurred_at,
             )
+        )
+    if (
+        event.type in STOCK_IN_EVENT_TYPES
+        and batch.status == BatchStatus.PENDING_SYNC.value
+        and event.items
+        and opening_pieces == len(event.items)
+    ):
+        # QR codes made from the franchise's Tally godown stock: the stock is
+        # already in Tally, so booking it into Lite must not post a Purchase.
+        batch.status = BatchStatus.SYNCED.value
+        batch.synced_at = utc_now()
+        batch.notes = f"{batch.notes}; opening stock already in Tally, no voucher posted"
+    elif opening_pieces:
+        batch.notes = (
+            f"{batch.notes}; {opening_pieces} of {len(event.items)} pieces are Tally opening "
+            "stock and are left out of this Purchase"
         )
     return {
         "batch_id": batch.id,
@@ -1043,6 +1148,7 @@ def _receive_transfer(
 
     transfer_items = {item.serial.serial_number: item for item in transfer.items}
     received_serials: list[str] = []
+    received_for_tally: list[tuple[Serial, NetworkEventItem]] = []
     for event_item in event.items:
         transfer_item = transfer_items.get(event_item.serial_number)
         if transfer_item is None:
@@ -1084,6 +1190,7 @@ def _receive_transfer(
         serial.status = received_status
         _update_serial_snapshot(serial, node, event_item)
         received_serials.append(serial.serial_number)
+        received_for_tally.append((serial, event_item))
 
     all_received = all(item.received_quantity >= item.quantity for item in transfer.items)
     transfer.status = (
@@ -1093,6 +1200,7 @@ def _receive_transfer(
     if all_received:
         transfer.received_at = event.occurred_at
 
+    _queue_transfer_stock_journal(db, node, inbound, event, transfer, received_for_tally)
     source = transfer.source_franchise
     command = queue_node_command(
         db,

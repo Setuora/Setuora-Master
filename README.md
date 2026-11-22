@@ -25,7 +25,7 @@ The former SFTP debtor/creditor worker, which assumed Tally at each franchise, i
 
 ## Network boundary
 
-The Windows application binds to an available loopback port, starting with `127.0.0.1:8000`. Setup saves the selected port and reuses it on updates; if another application occupies it, Start selects a new free port. Open the installed `setuora.bat` and choose **Start**; it opens the browser at the current address. Setup installs or finds Tailscale, connects this computer to the tailnet, and uses private Tailscale Serve to publish only `/api/v1/` over HTTPS. The admin console and Tally port stay local. Each Lite makes outbound HTTPS requests; no public Lite port or purchased domain is required.
+The Windows application binds to an available loopback port, starting with `127.0.0.1:8000`. Setup saves the selected port and reuses it on updates; if another application occupies it, Start selects a new free port. A successful Start prints the local-only browser address (`http://127.0.0.1:<port>`) and opens it; this address is for use on this computer, not other PCs on the network. Open the installed `setuora.bat` and choose **Start**; it opens the browser at the current address. Setup installs or finds Tailscale, connects this computer to the tailnet, and uses private Tailscale Serve to publish only `/api/v1/` over HTTPS. The admin console and Tally port stay local. Each Lite makes outbound HTTPS requests; no public Lite port or purchased domain is required.
 
 ## Windows installation
 

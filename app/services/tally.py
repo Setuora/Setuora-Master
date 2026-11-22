@@ -32,13 +32,14 @@ from app.services.settings import (
     parse_sales_gst_ledger_mappings,
 )
 from app.services.tally_endpoint import build_tally_url, read_tally_response
-from app.services.voucher import calculate_voucher_summary
+from app.services.voucher import VoucherLine, calculate_voucher_summary, packet_kg
 
 TALLY_XML_SUPPORTED_BATCH_TYPES = {
     BatchType.PURCHASE.value,
     BatchType.RECEIVE.value,
     BatchType.SALE.value,
     BatchType.SALES_RETURN.value,
+    BatchType.STOCK_TRANSFER.value,
 }
 SYNC_LEASE_MINUTES = 10
 MAX_AUTOMATIC_TALLY_RETRIES = 3
@@ -49,6 +50,7 @@ REQUIRED_TALLY_SETTING_KEYS = {
 DEFAULT_SALES_VOUCHER_TYPE = "Sales"
 DEFAULT_PURCHASE_VOUCHER_TYPE = "Purchase"
 DEFAULT_SALES_RETURN_VOUCHER_TYPE = "Credit Note"
+DEFAULT_STOCK_JOURNAL_VOUCHER_TYPE = "Stock Journal"
 
 
 class TallySyncError(RuntimeError):
@@ -94,7 +96,14 @@ def require_tally_settings(settings: dict[str, str]) -> None:
         raise TallySyncError(str(exc), retryable=False) from exc
 
 
-def _voucher_type(settings: dict[str, str], batch_type: BatchType) -> str:
+def _voucher_type(
+    settings: dict[str, str], batch_type: BatchType, override: str | None = None
+) -> str:
+    # A franchise can name its own voucher type, e.g. "Chintamani Warehouse Sale".
+    if override and override.strip():
+        return override.strip()
+    if batch_type == BatchType.STOCK_TRANSFER:
+        return DEFAULT_STOCK_JOURNAL_VOUCHER_TYPE
     if batch_type == BatchType.SALE:
         return settings.get("sales_voucher_type", "").strip() or DEFAULT_SALES_VOUCHER_TYPE
     if batch_type == BatchType.SALES_RETURN:
@@ -165,6 +174,15 @@ def _money(value: float | int | Decimal) -> str:
     return str(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
+def _tally_quantity(line: VoucherLine) -> tuple[str, str]:
+    """Tally quantity and rate text; a KG packet piece (e.g. 500GM) posts its weight."""
+    kg = packet_kg(line.tally_stock_item_name, line.unit)
+    if kg is None:
+        return f"{line.quantity} {line.unit}", f"{_money(line.rate)}/{line.unit}"
+    # Keep the billed amount; only express it per KG, as Tally stocks the item.
+    return f"{(kg * line.quantity).normalize():f} {line.unit}", f"{_money(line.rate / kg)}/{line.unit}"
+
+
 # Tally voucher dates follow the local business day.
 _IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -188,10 +206,12 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
     batch_type = BatchType(batch.batch_type)
     if batch.batch_type not in TALLY_XML_SUPPORTED_BATCH_TYPES:
         raise TallySyncError(f"Tally XML is not configured for {batch.batch_type}", retryable=False)
+    if batch_type == BatchType.STOCK_TRANSFER:
+        return build_stock_journal_xml(batch, settings)
     is_sale = batch_type == BatchType.SALE
     is_sales_side = batch_type in {BatchType.SALE, BatchType.SALES_RETURN}
     voucher_view = "Invoice Voucher View" if is_sales_side else "Accounting Voucher View"
-    voucher_type = _voucher_type(settings, batch_type)
+    voucher_type = _voucher_type(settings, batch_type, batch.tally_voucher_type)
     party_name = (batch.party_name or "").strip()
     if not party_name:
         raise TallySyncError(
@@ -301,20 +321,21 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
         inventory = ET.SubElement(voucher, "ALLINVENTORYENTRIES.LIST")
         _text(inventory, "STOCKITEMNAME", line.tally_stock_item_name)
         _text(inventory, "ISDEEMEDPOSITIVE", "No" if income_is_credit else "Yes")
-        _text(inventory, "RATE", f"{_money(line.rate)}/{line.unit}")
+        quantity, rate = _tally_quantity(line)
+        _text(inventory, "RATE", rate)
         if is_sale and line.discount_rate > 0:
             _text(inventory, "DISCOUNT", _money(line.discount_rate))
         signed_line = line.taxable_value if income_is_credit else -line.taxable_value
         _text(inventory, "AMOUNT", _money(signed_line))
-        _text(inventory, "ACTUALQTY", f"{line.quantity} {line.unit}")
-        _text(inventory, "BILLEDQTY", f"{line.quantity} {line.unit}")
+        _text(inventory, "ACTUALQTY", quantity)
+        _text(inventory, "BILLEDQTY", quantity)
         batch_allocation = ET.SubElement(inventory, "BATCHALLOCATIONS.LIST")
         _text(batch_allocation, "GODOWNNAME", stock_location)
         _text(batch_allocation, "BATCHNAME", "Primary Batch")
         _text(batch_allocation, "DESTINATIONGODOWNNAME", stock_location)
         _text(batch_allocation, "AMOUNT", _money(signed_line))
-        _text(batch_allocation, "ACTUALQTY", f"{line.quantity} {line.unit}")
-        _text(batch_allocation, "BILLEDQTY", f"{line.quantity} {line.unit}")
+        _text(batch_allocation, "ACTUALQTY", quantity)
+        _text(batch_allocation, "BILLEDQTY", quantity)
         allocations = ET.SubElement(inventory, "ACCOUNTINGALLOCATIONS.LIST")
         line_income_ledger = (
             sales_ledgers(line.gst_rate)["sales"] if is_sales_side else purchase_ledgers["purchase"]
@@ -377,6 +398,86 @@ def build_voucher_xml(batch: Batch, settings: dict[str, str]) -> str:
             round_off_signed_amount,
         )
 
+    return ET.tostring(envelope, encoding="unicode")
+
+
+def _import_envelope(company_name: str) -> tuple[ET.Element, ET.Element]:
+    envelope = ET.Element("ENVELOPE")
+    header = ET.SubElement(envelope, "HEADER")
+    _text(header, "TALLYREQUEST", "Import Data")
+    body = ET.SubElement(envelope, "BODY")
+    import_data = ET.SubElement(body, "IMPORTDATA")
+    request_desc = ET.SubElement(import_data, "REQUESTDESC")
+    _text(request_desc, "REPORTNAME", "Vouchers")
+    static_variables = ET.SubElement(request_desc, "STATICVARIABLES")
+    _text(static_variables, "SVCURRENTCOMPANY", company_name)
+    request_data = ET.SubElement(import_data, "REQUESTDATA")
+    message = ET.SubElement(request_data, "TALLYMESSAGE", {"xmlns:UDF": "TallyUDF"})
+    return envelope, message
+
+
+def build_stock_journal_xml(batch: Batch, settings: dict[str, str]) -> str:
+    """Move received transfer stock from the source godown to the destination godown."""
+    source = (batch.tally_source_location or "").strip()
+    destination = (batch.tally_stock_location or "").strip()
+    if not source or not destination:
+        raise TallySyncError(
+            "Set a Tally godown on both franchises before posting this stock transfer.",
+            retryable=False,
+        )
+    if source.casefold() == destination.casefold():
+        raise TallySyncError(
+            "The source and destination franchises use the same Tally godown.",
+            retryable=False,
+        )
+    summary = calculate_voucher_summary(batch)
+    if not summary.lines:
+        raise TallySyncError("This stock transfer has no items to post.", retryable=False)
+    voucher_type = _voucher_type(settings, BatchType.STOCK_TRANSFER, batch.tally_voucher_type)
+    view = "Consumption Voucher View"
+    envelope, message = _import_envelope(settings["company_name"])
+    voucher = ET.SubElement(
+        message,
+        "VOUCHER",
+        {
+            "REMOTEID": tally_remote_id(batch, settings),
+            "VCHTYPE": voucher_type,
+            "ACTION": "Create",
+            "OBJVIEW": view,
+        },
+    )
+    _text(voucher, "DATE", _voucher_date(batch))
+    _text(voucher, "VOUCHERTYPENAME", voucher_type)
+    _text(voucher, "VOUCHERNUMBER", batch.batch_number)
+    _text(voucher, "PERSISTEDVIEW", view)
+    _text(
+        voucher,
+        "NARRATION",
+        f"Setuora stock transfer {batch.tally_reference or batch.batch_number}: "
+        f"{source} to {destination}",
+    )
+
+    def add_entries(tag: str, godown: str, inward: bool) -> None:
+        for line in summary.lines:
+            # Tally signs inventory: stock coming in is a debit (negative amount).
+            signed = -line.gross_value if inward else line.gross_value
+            entry = ET.SubElement(voucher, tag)
+            _text(entry, "STOCKITEMNAME", line.tally_stock_item_name)
+            _text(entry, "ISDEEMEDPOSITIVE", "Yes" if inward else "No")
+            quantity, rate = _tally_quantity(line)
+            _text(entry, "RATE", rate)
+            _text(entry, "AMOUNT", _money(signed))
+            _text(entry, "ACTUALQTY", quantity)
+            _text(entry, "BILLEDQTY", quantity)
+            allocation = ET.SubElement(entry, "BATCHALLOCATIONS.LIST")
+            _text(allocation, "GODOWNNAME", godown)
+            _text(allocation, "BATCHNAME", "Primary Batch")
+            _text(allocation, "AMOUNT", _money(signed))
+            _text(allocation, "ACTUALQTY", quantity)
+            _text(allocation, "BILLEDQTY", quantity)
+
+    add_entries("INVENTORYENTRIESOUT.LIST", source, inward=False)
+    add_entries("INVENTORYENTRIESIN.LIST", destination, inward=True)
     return ET.tostring(envelope, encoding="unicode")
 
 

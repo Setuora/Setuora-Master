@@ -197,6 +197,8 @@ try {
             Remove-NetFirewallRule -ErrorAction Stop
     } else {
         Assert-MasterServeRouteCleared
+        Get-NetFirewallRule -Name 'Setuora-Master-LAN' -ErrorAction SilentlyContinue |
+            Remove-NetFirewallRule -ErrorAction Stop
     }
     Remove-TaskIfPresent $TaskName
 

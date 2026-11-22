@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -7,6 +8,30 @@ from app.models import Batch, GstTreatment
 from app.services.batch_items import grouped_batch_items
 
 TWOPLACES = Decimal("0.01")
+KG_UNITS = {"KG", "KGS", "KILO", "KILOS", "KILOGRAM", "KILOGRAMS"}
+_PACK_SIZE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*-?\s*(KGS?|KILOS?|G|GMS?|GRMS?|GRAMS?)(?![A-Z])", re.IGNORECASE
+)
+
+
+def pack_grams(item_name: str) -> float | None:
+    """Pack size in grams from a name such as 'BGL SUGAR 500GM' or 'TOORDAL 1KG'."""
+
+    matches = _PACK_SIZE.findall(item_name.upper())
+    if not matches:
+        return None
+    size, unit = matches[-1]
+    grams = float(size) * (1000 if unit.upper().startswith("K") else 1)
+    return grams if grams > 0 else None
+
+
+def packet_kg(item_name: str, unit: str) -> Decimal | None:
+    """KG in one QR piece of a KG-stocked packet item, or None when a piece is one unit."""
+
+    if (unit or "").strip().upper() not in KG_UNITS:
+        return None
+    grams = pack_grams(item_name or "")
+    return Decimal(str(grams)) / 1000 if grams else None
 
 
 def money(value: float | int | str | Decimal) -> Decimal:

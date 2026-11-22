@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Tally sync - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Tally sync</h1>
+    <p class="muted">Bring each franchise's receipts in from central Tally, then send its sales, returns and stock transfers back. Set each franchise's voucher types on the <a href="/franchises">Franchises</a> page.</p>
+  </div>
+</section>
+
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="alert success" role="status">{{ message }}</div>{% endif %}
+{% if not tally_enabled %}<div class="alert error" role="alert">Tally sync is turned off in Settings. Receipts can still be read, but vouchers will not be sent to Tally.</div>{% endif %}
+
+<section class="panel">
+  <div class="section-title"><h2>1. Receipts from Tally</h2><span>Tally → Master → franchise</span></div>
+  {% if receipt_nodes %}
+  <p>Reads each franchise's receipt vouchers from Tally. New or changed receipts, and the customer ledgers in them, are sent to that franchise's Lite.</p>
+  <form method="post" action="/tally-sync/receipts" class="grid-form">
+    <label>Franchise
+      <select name="franchise">
+        <option value="all">All franchises with a receipt voucher type</option>
+        {% for node in receipt_nodes %}<option value="{{ node.public_id }}">{{ node.code }} · {{ node.name }} ({{ node.tally_receipt_voucher_type }})</option>{% endfor %}
+      </select>
+    </label>
+    <label>From<input name="from_date" type="date" value="{{ default_from }}" required></label>
+    <label>To<input name="to_date" type="date" value="{{ default_to }}" required></label>
+    <div class="span-all"><button class="button primary" type="submit">Sync receipts now</button></div>
+  </form>
+  {% else %}
+  <p class="muted">No franchise has a Tally receipt voucher type yet. On the <a href="/franchises">Franchises</a> page, open <strong>Tally voucher types</strong> for the franchise and enter it exactly as in Tally, for example <strong>Recipets Chintamani Warehouse</strong>.</p>
+  {% endif %}
+
+  <details>
+    <summary>Auto sync schedule</summary>
+    <dl class="details">
+      <dt>Schedule</dt><dd>{{ 'Off' if sync_minutes == 0 else 'Every ' ~ sync_minutes ~ ' minute' ~ ('' if sync_minutes == 1 else 's') }}</dd>
+      <dt>Last run</dt><dd>{{ last_sync_at|report_date if last_sync_at else 'Not run yet' }}</dd>
+      <dt>Result</dt><dd>{{ last_sync_result or 'Not run yet' }}</dd>
+    </dl>
+    <form method="post" action="/tally-sync/schedule" class="grid-form">
+      <label>Sync every (minutes)<input name="sync_minutes" type="number" min="0" max="{{ max_sync_minutes }}" value="{{ sync_minutes }}" required><small>0 turns auto sync off.</small></label>
+      <label>Days to look back<input name="sync_days" type="number" min="1" max="{{ max_sync_days }}" value="{{ sync_days }}" required><small>Auto sync reads receipts dated in this many past days.</small></label>
+      <div class="span-all"><button class="button" type="submit">Save schedule</button></div>
+    </form>
+  </details>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>2. Sales, returns and transfers to Tally</h2><span>Franchise → Master → Tally</span></div>
+  <p>Vouchers are sent automatically in the background. Use this to send everything that is waiting right now.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">Franchise</th><th scope="col">Godown</th><th scope="col">Sales voucher type</th><th scope="col">Return voucher type</th><th scope="col" class="numeric">Waiting</th><th scope="col" class="numeric">Failed</th><th scope="col" class="numeric">Needs review</th></tr></thead>
+      <tbody>
+        {% for node in nodes %}{% set counts = open_counts.get(node.id, {}) %}
+        <tr>
+          <td class="cell-wrap"><strong>{{ node.code }}</strong><small>{{ node.name }}</small></td>
+          <td class="cell-wrap">{{ node.tally_godown_name or 'Master default' }}</td>
+          <td class="cell-wrap">{{ node.tally_sales_voucher_type or 'Master default' }}</td>
+          <td class="cell-wrap">{{ node.tally_sales_return_voucher_type or 'Master default' }}</td>
+          <td class="numeric">{{ counts.get('PENDING_SYNC', 0) + counts.get('SYNCING', 0) }}</td>
+          <td class="numeric">{{ counts.get('FAILED', 0) }}</td>
+          <td class="numeric">{{ counts.get('REVIEW_REQUIRED', 0) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">No active franchise.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" action="/tally-sync/push" class="actions">
+    <button class="button primary" type="submit" {% if not tally_enabled %}disabled{% endif %}>Send waiting vouchers to Tally now</button>
+    <a class="button" href="/network/tally">Open Tally queue</a>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-title"><h2>Receipts read from Tally</h2><span>{{ receipts|length }} shown{% if selected %} for {{ selected.code }}{% endif %}</span></div>
+  <form method="get" action="/tally-sync" class="actions">
+    <label>Franchise
+      <select name="franchise">
+        <option value="">All franchises</option>
+        {% for node in receipt_nodes %}<option value="{{ node.code }}" {% if selected and selected.id == node.id %}selected{% endif %}>{{ node.code }}</option>{% endfor %}
+      </select>
+    </label>
+    <button class="button small" type="submit">Filter</button>
+  </form>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">Date</th><th scope="col">No.</th><th scope="col">Franchise</th><th scope="col">Customer ledgers</th><th scope="col">Bank</th><th scope="col" class="numeric">Amount</th><th scope="col">Sent to franchise</th></tr></thead>
+      <tbody>
+        {% for receipt in receipts %}
+        <tr>
+          <td>{{ receipt.voucher_date.strftime('%d-%b-%y') }}</td>
+          <td>{{ receipt.voucher_number or '—' }}</td>
+          <td>{{ receipt.franchise.code }}</td>
+          <td class="cell-wrap">
+            {% for line in receipt.lines %}<div>{{ line.ledger_name }} <small>₹{{ line.amount }}</small></div>{% endfor %}
+          </td>
+          <td class="cell-wrap">{{ receipt.bank_ledger or '—' }}</td>
+          <td class="numeric">₹{{ '%.2f'|format(receipt.total_amount) }}</td>
+          <td><small class="cell-date">{{ receipt.last_synced_at|report_date }}</small></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">No receipts read yet. Choose Sync receipts now.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

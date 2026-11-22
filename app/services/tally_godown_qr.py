@@ -18,11 +18,13 @@ import re
 import time
 import xml.etree.ElementTree as ET  # nosec B405 - builds requests only; responses use defusedxml
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.models import (
     Batch,
     BatchItem,
@@ -47,24 +49,30 @@ from app.services.tally_masters import (
     _post_read_request,
     fetch_tally_stock_items,
 )
-from app.services.tally_products import _local_code, import_blocker, import_tally_products
+from app.services.tally_products import (
+    _local_code,
+    active_tally_source,
+    import_blocker,
+    import_tally_products,
+)
 from app.services.voucher import KG_UNITS, pack_grams
 
 PLAN_KEY_PREFIX = "tally_godown_qr_plan:"
+AUTO_SYNC_MINUTES_KEY = "tally_godown_sync_minutes"
+AUTO_SYNC_LAST_AT_KEY = "tally_godown_sync_last_at"
+AUTO_SYNC_LAST_RESULT_KEY = "tally_godown_sync_last_result"
+DEFAULT_AUTO_SYNC_MINUTES = 30
+MAX_AUTO_SYNC_MINUTES = 1440
 # Tally can take minutes to build the first item list when company data is on a network share.
 LIST_TIMEOUT_SECONDS = 900
 ITEM_TIMEOUT_SECONDS = 20
 ITEM_PAUSE_SECONDS = 0.1
-# Serials that no longer count as stock held at the franchise.
-NOT_HELD_STATUSES = {
-    SerialStatus.SOLD.value,
-    SerialStatus.DAMAGED.value,
-    SerialStatus.MISSING.value,
-    SerialStatus.INVALID.value,
-    SerialStatus.REPLACED.value,
-    SerialStatus.PURCHASE_RETURN.value,
-    SerialStatus.IN_TRANSIT.value,
-}
+# Labels that stand for no piece in Tally: replaced by a new label, or voided.
+NEVER_IN_TALLY_STATUSES = {SerialStatus.INVALID.value, SerialStatus.REPLACED.value}
+# Pieces that leave Tally's godown only once their voucher is posted.
+POSTED_OUT_STATUSES = {SerialStatus.SOLD.value, SerialStatus.PURCHASE_RETURN.value}
+POSTED_OUT_BATCH_TYPES = {BatchType.SALE.value, BatchType.PURCHASE_RETURN.value}
+POSTED_BATCH_STATUSES = {BatchStatus.SYNCED.value, BatchStatus.CLOSED.value}
 _QUANTITY = re.compile(r"^\s*(-?[\d,]*\.?\d+)\s*(.*)$")
 
 
@@ -172,33 +180,53 @@ def fetch_godown_quantities(
 
 
 def _held_counts(db: Session, node: FranchiseNode) -> dict[int, int]:
+    """Pieces Tally should show in this franchise's godown, per product.
+
+    Damaged, missing and issued pieces are never posted out of Tally, and pieces
+    sent to another franchise stay in this godown until the transfer's Stock
+    Journal posts, so all of them still count. Sold and purchase-returned pieces
+    count until their voucher posts. Counting less than Tally holds would make a
+    reload create labels for pieces that already have one.
+    """
+    unposted_out = (
+        select(BatchItem.serial_id)
+        .join(Batch, Batch.id == BatchItem.batch_id)
+        .where(
+            Batch.batch_type.in_(POSTED_OUT_BATCH_TYPES),
+            Batch.status.not_in(POSTED_BATCH_STATUSES),
+        )
+    )
     rows = db.execute(
-        select(Serial.product_id, func.count(NetworkStock.id))
+        select(Serial.product_id, func.count(func.distinct(Serial.id)))
         .join(NetworkStock, NetworkStock.serial_id == Serial.id)
         .where(
             NetworkStock.current_franchise_id == node.id,
-            NetworkStock.status.not_in(NOT_HELD_STATUSES),
+            NetworkStock.status.not_in(NEVER_IN_TALLY_STATUSES),
+            or_(
+                NetworkStock.status.not_in(POSTED_OUT_STATUSES),
+                Serial.id.in_(unposted_out),
+            ),
         )
         .group_by(Serial.product_id)
     ).all()
     held = dict(rows)
-    # Sold in Lite but not yet posted to Tally: Tally still counts these pieces,
-    # so a reload in that window must not create labels for them again.
-    unposted = db.execute(
-        select(Serial.product_id, func.count(func.distinct(Serial.id)))
-        .join(NetworkStock, NetworkStock.serial_id == Serial.id)
-        .join(BatchItem, BatchItem.serial_id == Serial.id)
-        .join(Batch, Batch.id == BatchItem.batch_id)
-        .where(
-            NetworkStock.current_franchise_id == node.id,
-            NetworkStock.status == SerialStatus.SOLD.value,
-            Batch.batch_type == BatchType.SALE.value,
-            Batch.status.not_in({BatchStatus.SYNCED.value, BatchStatus.CLOSED.value}),
-        )
-        .group_by(Serial.product_id)
-    ).all()
-    for product_id, count in unposted:
-        held[product_id] = held.get(product_id, 0) + count
+    godown = (node.tally_godown_name or "").strip()
+    if godown:
+        moved_out = db.execute(
+            select(Serial.product_id, func.count(func.distinct(Serial.id)))
+            .join(NetworkStock, NetworkStock.serial_id == Serial.id)
+            .join(BatchItem, BatchItem.serial_id == Serial.id)
+            .join(Batch, Batch.id == BatchItem.batch_id)
+            .where(
+                NetworkStock.current_franchise_id != node.id,
+                Batch.batch_type == BatchType.STOCK_TRANSFER.value,
+                Batch.status.not_in(POSTED_BATCH_STATUSES),
+                func.upper(Batch.tally_source_location) == godown.upper(),
+            )
+            .group_by(Serial.product_id)
+        ).all()
+        for product_id, count in moved_out:
+            held[product_id] = held.get(product_id, 0) + count
     return held
 
 
@@ -362,3 +390,105 @@ def create_from_plan(
         done_items += 1
         done_serials += len(serials)
     return done_items, done_serials
+
+
+def auto_sync_interval_minutes(db: Session) -> int:
+    try:
+        minutes = int(get_setting(db, AUTO_SYNC_MINUTES_KEY, str(DEFAULT_AUTO_SYNC_MINUTES)))
+    except ValueError:
+        return DEFAULT_AUTO_SYNC_MINUTES
+    return max(0, min(minutes, MAX_AUTO_SYNC_MINUTES))
+
+
+def save_auto_sync_interval(db: Session, raw: str) -> None:
+    value = raw.strip()
+    if not value.isdigit() or int(value) > MAX_AUTO_SYNC_MINUTES:
+        raise ValueError(f"Godown stock check must be 0 to {MAX_AUTO_SYNC_MINUTES} minutes.")
+    update_settings(db, {AUTO_SYNC_MINUTES_KEY: str(int(value))})
+
+
+def auto_sync_last_at(db: Session) -> datetime | None:
+    raw = get_setting(db, AUTO_SYNC_LAST_AT_KEY, "")
+    try:
+        return datetime.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def auto_sync_franchises(db: Session) -> list[FranchiseNode]:
+    """Franchises whose first godown load is done: later stock arrives automatically.
+
+    The first load of a franchise stays a reviewed, manual step.
+    """
+    loaded = exists().where(
+        NetworkStock.origin_franchise_id == FranchiseNode.id,
+        NetworkStock.serial_id == Serial.id,
+        Serial.product_batch_number == TALLY_OPENING_BATCH,
+    )
+    return list(
+        db.scalars(
+            select(FranchiseNode)
+            .where(
+                FranchiseNode.active.is_(True),
+                FranchiseNode.tally_godown_name.is_not(None),
+                FranchiseNode.tally_godown_name != "",
+                loaded,
+            )
+            .order_by(FranchiseNode.code)
+        )
+    )
+
+
+def _record_auto_sync(result: str) -> None:
+    with SessionLocal() as db:
+        update_settings(
+            db, {AUTO_SYNC_LAST_AT_KEY: utc_now().isoformat(), AUTO_SYNC_LAST_RESULT_KEY: result}
+        )
+
+
+def run_godown_auto_sync(*, force: bool = False) -> str | None:
+    """Create QR stock for pieces newly added to each franchise's Tally godown."""
+
+    with SessionLocal() as db:
+        minutes = auto_sync_interval_minutes(db)
+        last = auto_sync_last_at(db)
+        if not force and (
+            minutes <= 0 or (last is not None and utc_now() - last < timedelta(minutes=minutes))
+        ):
+            return None
+        targets = [
+            (node.id, node.code, node.tally_godown_name or "") for node in auto_sync_franchises(db)
+        ]
+        if not targets:
+            return None
+        try:
+            config, company = active_tally_source(db)
+        except TallyDataError as exc:
+            _record_auto_sync(f"Failed: {exc}")
+            return None
+    results: list[str] = []
+    for node_id, code, godown in targets:
+        started = utc_now()
+        try:
+            quantities, items, skipped = read_godown_stock(config, company, godown)
+        except TallyDataError as exc:
+            results.append(f"{code}: Tally did not answer ({exc})")
+            continue
+        with SessionLocal() as db:
+            # A voucher posted while Tally was being read may be missing from what
+            # was read, which would look like new stock. Read again next run.
+            if db.scalar(select(Batch.id).where(Batch.synced_at >= started).limit(1)) is not None:
+                results.append(f"{code}: Tally changed during the check; checking again next run")
+                continue
+            node = db.get(FranchiseNode, node_id)
+            plan = plan_from_stock(db, node, quantities, items, skipped)
+            done_items, serials = create_from_plan(
+                db, node, plan, plan["token"], created_by_id=None
+            )
+            text = f"{code}: {serials} new QR labels for {done_items} items"
+            if plan["mismatches"]:
+                text += f"; {plan['mismatches']} items hold more than Tally shows (check on Load from Tally)"
+            results.append(text)
+    result = ". ".join(results) + "."
+    _record_auto_sync(result)
+    return result

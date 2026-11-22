@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.auth import ADMIN_ROLES, require_user
 from app.database import get_db
 from app.models import Batch, BatchStatus, FranchiseNode, InboundEvent, TallyReceipt
+from app.services import tally_godown_qr as godown_qr
 from app.services.settings import get_setting, is_tally_enabled
 from app.services.sync_worker import retry_pending_batches
 from app.services.tally import TALLY_XML_SUPPORTED_BATCH_TYPES
@@ -118,6 +119,10 @@ def tally_sync_page(
             "max_sync_days": MAX_SYNC_DAYS,
             "last_sync_at": last_sync_at(db),
             "last_sync_result": get_setting(db, SYNC_LAST_RESULT_KEY, ""),
+            "godown_minutes": godown_qr.auto_sync_interval_minutes(db),
+            "max_godown_minutes": godown_qr.MAX_AUTO_SYNC_MINUTES,
+            "godown_last_at": godown_qr.auto_sync_last_at(db),
+            "godown_last_result": get_setting(db, godown_qr.AUTO_SYNC_LAST_RESULT_KEY, ""),
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -170,11 +175,14 @@ def save_schedule(
     request: Request,
     sync_minutes: str = Form(...),
     sync_days: str = Form(...),
+    godown_minutes: str = Form(""),
     db: Session = Depends(get_db),
 ):
     require_user(request, db, roles=ADMIN_ROLES)
     try:
         save_sync_schedule(db, sync_minutes, sync_days)
+        if godown_minutes.strip():
+            godown_qr.save_auto_sync_interval(db, godown_minutes)
     except ValueError as exc:
         return _redirect(error=str(exc))
-    return _redirect(message="Receipt auto sync schedule saved.")
+    return _redirect(message="Auto sync schedule saved.")

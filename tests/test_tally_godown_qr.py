@@ -185,3 +185,126 @@ def test_reload_counts_sales_not_yet_posted_to_tally_as_held(db_session):
     db_session.commit()
     line = godown_qr.plan_from_stock(db_session, node, {"FACE WASH 100ML": (2.0, "PCS")}, _items(), [])["lines"][0]
     assert (line["already_held"], line["to_create"]) == (2, 0)
+
+
+class _Use:
+    def __init__(self, session):
+        self.session = session
+
+    def __enter__(self):
+        return self.session
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _loaded_node(db_session, code, pieces=4):
+    node = create_franchise_node(db_session, code=code, name=f"N {code}", location="X")
+    node.tally_godown_name = GODOWN
+    db_session.commit()
+    plan = godown_qr.plan_from_stock(
+        db_session, node, {"FACE WASH 100ML": (float(pieces), "PCS")}, _items(), []
+    )
+    godown_qr.create_from_plan(db_session, node, plan, plan["token"], created_by_id=None)
+    return node
+
+
+def _set_status(db_session, serial, status):
+    stock = db_session.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
+    serial.status = stock.status = status
+    return stock
+
+
+def test_held_count_is_what_tally_still_shows_in_the_godown(db_session):
+    from app.models import Batch, BatchItem, BatchStatus, BatchType, SerialStatus
+
+    node = _loaded_node(db_session, "CHN-05", pieces=5)
+    other = create_franchise_node(db_session, code="CHN-06", name="Other", location="Y")
+    damaged, issued, in_transit, moved, sold = db_session.scalars(
+        select(Serial).order_by(Serial.id)
+    ).all()
+    _set_status(db_session, damaged, SerialStatus.DAMAGED.value)  # credit note put it back in Tally
+    _set_status(db_session, issued, SerialStatus.ISSUED.value)  # never posted out of Tally
+    _set_status(db_session, in_transit, SerialStatus.IN_TRANSIT.value)
+    _set_status(db_session, moved, SerialStatus.IN_STOCK.value).current_franchise_id = other.id
+    _set_status(db_session, sold, SerialStatus.SOLD.value)
+    journal = Batch(
+        batch_number="NET-SJ-1",
+        batch_type=BatchType.STOCK_TRANSFER.value,
+        status=BatchStatus.PENDING_SYNC.value,
+        user_id=node.service_user_id,
+        tally_source_location=GODOWN.lower(),
+    )
+    sale = Batch(
+        batch_number="NET-S-1",
+        batch_type=BatchType.SALE.value,
+        status=BatchStatus.SYNCED.value,
+        user_id=node.service_user_id,
+    )
+    db_session.add_all([journal, sale])
+    db_session.flush()
+    db_session.add_all(
+        [
+            BatchItem(batch_id=journal.id, serial_id=moved.id, quantity=1, rate=1),
+            BatchItem(batch_id=sale.id, serial_id=sold.id, quantity=1, rate=1),
+        ]
+    )
+    db_session.commit()
+
+    # Only the posted sale has left Tally's godown.
+    assert sum(godown_qr._held_counts(db_session, node).values()) == 4
+    journal.status = BatchStatus.SYNCED.value
+    db_session.commit()
+    assert sum(godown_qr._held_counts(db_session, node).values()) == 3
+
+
+def test_auto_sync_labels_new_stock_only_for_loaded_franchises(db_session, monkeypatch):
+    _loaded_node(db_session, "CHN-07", pieces=4)
+    fresh = create_franchise_node(db_session, code="CHN-08", name="Fresh", location="Z")
+    fresh.tally_godown_name = "FRESH GODOWN"
+    db_session.commit()
+    reads = []
+
+    def read(config, company, godown):
+        reads.append(godown)
+        return {"FACE WASH 100ML": (6.0, "PCS")}, _items()[:1], []
+
+    monkeypatch.setattr(godown_qr, "SessionLocal", lambda: _Use(db_session))
+    monkeypatch.setattr(godown_qr, "active_tally_source", lambda db: ({}, "Company"))
+    monkeypatch.setattr(godown_qr, "read_godown_stock", read)
+
+    result = godown_qr.run_godown_auto_sync()
+
+    assert reads == [GODOWN]  # the franchise without a first load is left alone
+    assert "CHN-07: 2 new QR labels for 1 items" in result
+    assert db_session.scalar(select(func.count(Serial.id))) == 6
+    # Not due again until the interval passes; then nothing new is created.
+    assert godown_qr.run_godown_auto_sync() is None
+    assert "0 new QR labels" in godown_qr.run_godown_auto_sync(force=True)
+    assert db_session.scalar(select(func.count(Serial.id))) == 6
+
+
+def test_auto_sync_waits_when_a_voucher_posts_during_the_read(db_session, monkeypatch):
+    from app.models import Batch, BatchStatus, BatchType, utc_now
+
+    node = _loaded_node(db_session, "CHN-09", pieces=4)
+
+    def read(config, company, godown):
+        db_session.add(
+            Batch(
+                batch_number="NET-S-9",
+                batch_type=BatchType.SALE.value,
+                status=BatchStatus.SYNCED.value,
+                user_id=node.service_user_id,
+                synced_at=utc_now(),
+            )
+        )
+        db_session.commit()
+        return {"FACE WASH 100ML": (9.0, "PCS")}, _items()[:1], []
+
+    monkeypatch.setattr(godown_qr, "SessionLocal", lambda: _Use(db_session))
+    monkeypatch.setattr(godown_qr, "active_tally_source", lambda db: ({}, "Company"))
+    monkeypatch.setattr(godown_qr, "read_godown_stock", read)
+
+    assert "checking again next run" in godown_qr.run_godown_auto_sync(force=True)
+    assert db_session.scalar(select(func.count(Serial.id))) == 4

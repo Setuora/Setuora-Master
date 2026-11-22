@@ -32,6 +32,12 @@ from app.services.settings import (
     parse_sales_gst_ledger_mappings,
 )
 from app.services.tally_endpoint import build_tally_url, read_tally_response
+from app.services.tally_masters import (
+    _build_collection_export,
+    _direct_text,
+    _local_tag,
+    _post_read_request,
+)
 from app.services.voucher import VoucherLine, calculate_voucher_summary, packet_kg
 
 TALLY_XML_SUPPORTED_BATCH_TYPES = {
@@ -43,6 +49,11 @@ TALLY_XML_SUPPORTED_BATCH_TYPES = {
 }
 SYNC_LEASE_MINUTES = 10
 MAX_AUTOMATIC_TALLY_RETRIES = 3
+# Tally answers one request at a time; a busy Tally (a report open, a backup
+# running) is slow, and a timeout leaves the import outcome unknown.
+TALLY_POST_TIMEOUT_SECONDS = 30
+POSTED_VOUCHER_LOOKUP_TIMEOUT_SECONDS = 60
+COMPANY_NOT_OPEN_ERROR = "Could not set 'SVCurrentCompany'"
 REQUIRED_TALLY_SETTING_KEYS = {
     "company_name": "company name",
     "round_off_ledger_name": "round off ledger",
@@ -61,12 +72,16 @@ class TallySyncError(RuntimeError):
         request_xml: str | None = None,
         response_xml: str | None = None,
         outcome_unknown: bool = False,
+        not_imported: bool = False,
     ):
         super().__init__(message)
         self.retryable = retryable
         self.request_xml = request_xml
         self.response_xml = response_xml
         self.outcome_unknown = outcome_unknown
+        # Tally certainly never saw the voucher (closed, or company not open), so
+        # retrying is safe for as long as that lasts.
+        self.not_imported = not_imported
 
 
 @dataclass
@@ -491,7 +506,7 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
     )
     try:
         # build_tally_url fixes the scheme and rejects URL syntax in the host.
-        with urlopen(request, timeout=5) as response:  # nosec B310
+        with urlopen(request, timeout=TALLY_POST_TIMEOUT_SECONDS) as response:  # nosec B310
             response_xml = read_tally_response(response)
     except (URLError, OSError, HTTPException) as exc:
         reason = exc.reason if isinstance(exc, URLError) else exc
@@ -508,6 +523,7 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
             retryable=not_connected,
             request_xml=xml,
             outcome_unknown=not not_connected,
+            not_imported=not_connected,
         ) from exc
     except ValueError as exc:
         raise TallySyncError(
@@ -541,6 +557,16 @@ def post_to_tally(xml: str, settings: dict[str, str]) -> TallyResult:
         except (TypeError, ValueError):
             return 0
 
+    if errors and all(error.startswith(COMPANY_NOT_OPEN_ERROR) for error in errors):
+        # Tally is running but the company is closed or waiting at its login.
+        raise TallySyncError(
+            "The Tally company is not open. Open and log in to it in Tally; "
+            "Setuora retries automatically.",
+            retryable=True,
+            request_xml=xml,
+            response_xml=response_xml,
+            not_imported=True,
+        )
     if errors:
         raise TallySyncError(
             "; ".join(errors),
@@ -740,9 +766,12 @@ def _sync_batch_locked(db: Session, batch: Batch) -> None:
             BatchStatus.REVIEW_REQUIRED.value
             if exc.outcome_unknown
             else BatchStatus.PENDING_SYNC.value
-            if exc.retryable
-            and claim_status != BatchStatus.FAILED.value
-            and batch.retry_count < MAX_AUTOMATIC_TALLY_RETRIES
+            if exc.not_imported
+            or (
+                exc.retryable
+                and claim_status != BatchStatus.FAILED.value
+                and batch.retry_count < MAX_AUTOMATIC_TALLY_RETRIES
+            )
             else BatchStatus.FAILED.value
         )
         batch.last_error = str(exc)
@@ -801,3 +830,44 @@ def reconcile_batch(
             )
         )
         db.commit()
+
+
+def find_posted_voucher(settings: dict[str, str], request_xml: str) -> str | None:
+    """Look in Tally for the voucher a frozen request created; return its number.
+
+    Tally ignores REMOTEID and numbers imported vouchers itself, so the voucher
+    is matched by its date and exact Setuora narration, which names the batch.
+    Raises TallyDataError when Tally cannot answer.
+    """
+    request = safe_fromstring(request_xml)
+    voucher = next(node for node in request.iter() if _local_tag(node) == "VOUCHER")
+    narration = _direct_text(voucher, "NARRATION")
+    day = _direct_text(voucher, "DATE")
+    envelope, tdl_message = _build_collection_export(
+        "Setuora Posted Voucher",
+        "Voucher",
+        ("Date", "VoucherNumber", "Narration"),
+        company_name=settings.get("company_name", "").strip(),
+    )
+    static_variables = envelope.find("./BODY/DESC/STATICVARIABLES")
+    ET.SubElement(static_variables, "SVFROMDATE", {"TYPE": "Date"}).text = day
+    ET.SubElement(static_variables, "SVTODATE", {"TYPE": "Date"}).text = day
+    # A variable value, not a TDL string, so any narration text is safe.
+    ET.SubElement(static_variables, "SETUORANARRATION").text = narration
+    variable = ET.Element("VARIABLE", {"NAME": "SetuoraNarration"})
+    ET.SubElement(variable, "TYPE").text = "String"
+    tdl_message.insert(0, variable)
+    collection = next(node for node in tdl_message if _local_tag(node) == "COLLECTION")
+    ET.SubElement(collection, "FILTER").text = "SetuoraPostedVoucherFilter"
+    ET.SubElement(
+        tdl_message, "SYSTEM", {"TYPE": "Formulae", "NAME": "SetuoraPostedVoucherFilter"}
+    ).text = "$Narration = ##SetuoraNarration AND $Date >= ##SVFromDate AND $Date <= ##SVToDate"
+    _, root = _post_read_request(
+        settings,
+        ET.tostring(envelope, encoding="unicode"),
+        timeout=POSTED_VOUCHER_LOOKUP_TIMEOUT_SECONDS,
+    )
+    for node in root.iter():
+        if _local_tag(node) == "VOUCHER" and _direct_text(node, "NARRATION") == narration:
+            return _direct_text(node, "VOUCHERNUMBER") or "number not shown"
+    return None

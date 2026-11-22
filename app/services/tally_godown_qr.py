@@ -4,10 +4,10 @@ Setup-phase helper: read each stock item's closing quantity in the franchise's
 Tally godown, preview one QR label per piece, then allocate the serials through
 the normal QR workflow so Lite receives them as stock.
 
-Tally is asked about one item at a time with the item name passed as a quoted
-TDL string. An unquoted name is parsed as a formula and makes Tally open a
-"Bad formula" dialog that blocks its gateway, so names that cannot be quoted
-safely are skipped and the read stops at the first error.
+Tally is asked about one item at a time. The item name goes in a request
+variable, never inside a TDL formula: an unquoted name is parsed as a formula
+and makes Tally open a "Bad formula" dialog that blocks its gateway, and a
+name containing a quote mark cannot be quoted. The read stops at the first error.
 """
 
 from __future__ import annotations
@@ -23,7 +23,18 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import FranchiseNode, NetworkStock, Product, Serial, SerialStatus, utc_now
+from app.models import (
+    Batch,
+    BatchItem,
+    BatchStatus,
+    BatchType,
+    FranchiseNode,
+    NetworkStock,
+    Product,
+    Serial,
+    SerialStatus,
+    utc_now,
+)
 from app.services.network_ingest import TALLY_OPENING_BATCH
 from app.services.qr_allocation import MAX_ALLOCATION, allocate_qr_serials
 from app.services.settings import get_setting, update_settings
@@ -110,9 +121,13 @@ def _item_batches_xml(company_name: str, item_name: str) -> str:
         ("Name", "GodownName", "ClosingBalance"),
         company_name=company_name,
     )
-    collection = tdl_message.find("COLLECTION")
-    # A quoted TDL string; ElementTree escapes the XML characters.
-    ET.SubElement(collection, "CHILDOF").text = f'"{item_name}"'
+    # The name is a plain variable value, so quote marks in it are safe.
+    static_variables = envelope.find("./BODY/DESC/STATICVARIABLES")
+    ET.SubElement(static_variables, "SETUORAITEM").text = item_name
+    variable = ET.Element("VARIABLE", {"NAME": "SetuoraItem"})
+    ET.SubElement(variable, "TYPE").text = "String"
+    tdl_message.insert(0, variable)
+    ET.SubElement(tdl_message.find("COLLECTION"), "CHILDOF").text = "##SetuoraItem"
     return ET.tostring(envelope, encoding="unicode")
 
 
@@ -135,9 +150,6 @@ def fetch_godown_quantities(
     skipped: list[str] = []
     wanted = godown.strip().casefold()
     for name in candidates:
-        if '"' in name or "\\" in name:
-            skipped.append(name)
-            continue
         try:
             _, batches = _post_read_request(
                 settings, _item_batches_xml(company_name, name), timeout=ITEM_TIMEOUT_SECONDS
@@ -169,7 +181,25 @@ def _held_counts(db: Session, node: FranchiseNode) -> dict[int, int]:
         )
         .group_by(Serial.product_id)
     ).all()
-    return dict(rows)
+    held = dict(rows)
+    # Sold in Lite but not yet posted to Tally: Tally still counts these pieces,
+    # so a reload in that window must not create labels for them again.
+    unposted = db.execute(
+        select(Serial.product_id, func.count(func.distinct(Serial.id)))
+        .join(NetworkStock, NetworkStock.serial_id == Serial.id)
+        .join(BatchItem, BatchItem.serial_id == Serial.id)
+        .join(Batch, Batch.id == BatchItem.batch_id)
+        .where(
+            NetworkStock.current_franchise_id == node.id,
+            NetworkStock.status == SerialStatus.SOLD.value,
+            Batch.batch_type == BatchType.SALE.value,
+            Batch.status.not_in({BatchStatus.SYNCED.value, BatchStatus.CLOSED.value}),
+        )
+        .group_by(Serial.product_id)
+    ).all()
+    for product_id, count in unposted:
+        held[product_id] = held.get(product_id, 0) + count
+    return held
 
 
 def _node_products_by_tally_name(db: Session, node: FranchiseNode) -> dict[str, Product]:

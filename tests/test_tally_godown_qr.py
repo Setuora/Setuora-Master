@@ -24,17 +24,19 @@ def test_labels_count_pieces_and_kg_packets():
     assert godown_qr.labels_for("ITEM", 0, "PCS")[0] == 0
 
 
-def test_item_request_quotes_the_name_so_tally_does_not_read_a_formula():
-    xml = godown_qr._item_batches_xml("Company & Co", "100 MM GRENDING WHEEL")
-    childof = fromstring(xml).find(".//COLLECTION/CHILDOF")
-    assert childof.text == '"100 MM GRENDING WHEEL"'
+def test_item_request_passes_the_name_as_a_variable_not_a_formula():
+    xml = godown_qr._item_batches_xml("Company & Co", '14" Cut Off Wheel')
+    root = fromstring(xml)
+    assert root.find(".//COLLECTION/CHILDOF").text == "##SetuoraItem"
+    assert root.find(".//STATICVARIABLES/SETUORAITEM").text == '14" Cut Off Wheel'
+    assert root.find(".//TDLMESSAGE/VARIABLE").get("NAME") == "SetuoraItem"
 
 
 def _reply(body: str):
     return "", fromstring(f"<ENVELOPE><BODY><DATA><COLLECTION>{body}</COLLECTION></DATA></BODY></ENVELOPE>")
 
 
-def test_fetch_reads_only_the_franchise_godown_and_skips_quoted_names(monkeypatch):
+def test_fetch_reads_only_the_franchise_godown_including_quoted_names(monkeypatch):
     requests = []
     batches = {
         "SUGAR 500GM": (
@@ -42,6 +44,10 @@ def test_fetch_reads_only_the_franchise_godown_and_skips_quoted_names(monkeypatc
             "<CLOSINGBALANCE> 15.00 KG</CLOSINGBALANCE></BATCH>"
             '<BATCH NAME="Primary Batch"><GODOWNNAME>Main Location</GODOWNNAME>'
             "<CLOSINGBALANCE> 99.00 KG</CLOSINGBALANCE></BATCH>"
+        ),
+        '14" Cut Off Wheel': (
+            '<BATCH NAME="Primary Batch"><GODOWNNAME>CHINTHAMANI WAREHOUSE</GODOWNNAME>'
+            "<CLOSINGBALANCE> 3.00 PCS</CLOSINGBALANCE></BATCH>"
         ),
         "WHEEL": (
             '<BATCH NAME="Primary Batch"><GODOWNNAME>Main Location</GODOWNNAME>'
@@ -58,9 +64,9 @@ def test_fetch_reads_only_the_franchise_godown_and_skips_quoted_names(monkeypatc
                 '<STOCKITEM NAME="EMPTY"><CLOSINGBALANCE></CLOSINGBALANCE></STOCKITEM>'
                 '<STOCKITEM NAME="14&quot; Cut Off Wheel"><CLOSINGBALANCE> 3.00 PCS</CLOSINGBALANCE></STOCKITEM>'
             )
-        for name, body in batches.items():
-            if f"&quot;{name}&quot;" in xml or f'"{name}"' in xml:
-                return _reply(body)
+        item = fromstring(xml).find(".//STATICVARIABLES/SETUORAITEM")
+        if item is not None and item.text in batches:
+            return _reply(batches[item.text])
         raise AssertionError("unexpected request")
 
     monkeypatch.setattr(godown_qr, "_post_read_request", fake_post)
@@ -68,9 +74,9 @@ def test_fetch_reads_only_the_franchise_godown_and_skips_quoted_names(monkeypatc
 
     quantities, skipped = godown_qr.fetch_godown_quantities({}, "Company", GODOWN)
 
-    assert quantities == {"SUGAR 500GM": (15.0, "KG")}
-    assert skipped == ['14" Cut Off Wheel']
-    assert len(requests) == 3  # the list, then only the two items with stock
+    assert quantities == {"SUGAR 500GM": (15.0, "KG"), '14" Cut Off Wheel': (3.0, "PCS")}
+    assert skipped == []
+    assert len(requests) == 4  # the list, then only the three items with stock
 
 
 def _items():
@@ -146,3 +152,36 @@ def test_stale_preview_token_is_refused(db_session):
         assert "out of date" in str(exc)
     else:
         raise AssertionError("stale token accepted")
+
+
+def test_reload_counts_sales_not_yet_posted_to_tally_as_held(db_session):
+    from app.models import Batch, BatchItem, BatchStatus, BatchType, SerialStatus
+
+    node = create_franchise_node(db_session, code="CHN-04", name="Chintamani", location="Chintamani")
+    node.tally_godown_name = GODOWN
+    db_session.commit()
+    plan = godown_qr.plan_from_stock(db_session, node, {"FACE WASH 100ML": (3.0, "PCS")}, _items(), [])
+    godown_qr.create_from_plan(db_session, node, plan, plan["token"], created_by_id=None)
+    serial = db_session.scalars(select(Serial).order_by(Serial.id)).first()
+    stock = db_session.scalar(select(NetworkStock).where(NetworkStock.serial_id == serial.id))
+    serial.status = stock.status = SerialStatus.SOLD.value
+    sale = Batch(
+        batch_number="NET-SALE-1",
+        batch_type=BatchType.SALE.value,
+        status=BatchStatus.PENDING_SYNC.value,
+        user_id=node.service_user_id,
+    )
+    db_session.add(sale)
+    db_session.flush()
+    db_session.add(BatchItem(batch_id=sale.id, serial_id=serial.id, quantity=1, rate=120))
+    db_session.commit()
+
+    # Tally still shows 3 until the sale posts: nothing new to create.
+    line = godown_qr.plan_from_stock(db_session, node, {"FACE WASH 100ML": (3.0, "PCS")}, _items(), [])["lines"][0]
+    assert (line["already_held"], line["to_create"]) == (3, 0)
+
+    # Once posted, Tally shows 2 and Master holds 2.
+    sale.status = BatchStatus.SYNCED.value
+    db_session.commit()
+    line = godown_qr.plan_from_stock(db_session, node, {"FACE WASH 100ML": (2.0, "PCS")}, _items(), [])["lines"][0]
+    assert (line["already_held"], line["to_create"]) == (2, 0)

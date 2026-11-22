@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("menu", "setup", "preflight", "start", "stop", "status", "open", "logs", "update", "update-runtime", "uninstall", "help", "sftp-install", "sftp-add")]
+    [ValidateSet("menu", "setup", "preflight", "start", "stop", "status", "open", "logs", "update", "update-runtime", "uninstall", "help", "sftp-install", "sftp-add", "lan-on", "lan-off")]
     [string]$Command = "menu",
     [switch]$Elevated,
     [switch]$PauseAfter,
@@ -147,6 +147,8 @@ function Invoke-SetuoraDeployment([string]$Action, [string[]]$ExtraArguments = @
     }
     if (-not $python) { throw "Python 3.11 or newer was not found. Choose Start to install it." }
     $arguments = @($python["Prefix"]) + @((Join-Path $ApplicationRoot "deploy.py"), $Action) + $ExtraArguments
+    # Output is piped through Out-Host; unbuffered Python prints its messages (including the URL) immediately.
+    $env:PYTHONUNBUFFERED = "1"
     return Invoke-SetuoraNative ([string]$python["Name"]) $arguments
 }
 
@@ -274,7 +276,10 @@ function Invoke-SetuoraStart {
 
 function Open-SetuoraBrowser {
     # Start can move Master to another free port, so read the saved port again.
-    Start-Process -FilePath (Get-SetuoraBrowserUrl)
+    $url = Get-SetuoraBrowserUrl
+    Write-Host ""
+    Write-Host "Setuora Master is running. Local address (this computer only): $url" -ForegroundColor Green
+    Start-Process -FilePath $url
 }
 
 function Install-SetuoraUpdate {
@@ -305,13 +310,14 @@ function Show-SetuoraHelp {
     Write-Host "Start installs Master in $env:ProgramData\Setuora, or repairs or updates it, runs it and opens the browser."
     Write-Host "Stop keeps Master stopped, even after Windows restarts, until you choose Start."
     Write-Host "Uninstall saves a verified recovery copy, then removes the application."
-    Write-Host "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, help"
+    Write-Host "LAN on lets other PCs on this local network open Master; LAN off keeps it on this computer only."
+    Write-Host "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, lan-on, lan-off, help"
     Write-Host "Every command except status, open and help requests Administrator access."
     Write-Host "Browser: $BrowserUrl"
 }
 
 function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @()) {
-    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs", "sftp-install", "sftp-add")) {
+    if ($Action -in @("setup", "start", "stop", "preflight", "update", "update-runtime", "uninstall", "logs", "sftp-install", "sftp-add", "lan-on", "lan-off")) {
         if (-not (Test-SetuoraAdministrator)) {
             $code = Invoke-SetuoraElevated $Action $ExtraArguments
             # Open the browser on the original user's desktop, not as Administrator.
@@ -343,6 +349,11 @@ function Invoke-SetuoraCommand([string]$Action, [string[]]$ExtraArguments = @())
             return Install-SetuoraUpdate
         }
         "update-runtime" { return Invoke-SetuoraDeployment "update" }
+        { $_ -in @("lan-on", "lan-off") } {
+            $installed = Get-SetuoraInstalledRoot
+            if ($installed -and $installed -ne $ApplicationRoot) { return Invoke-SetuoraInstalledControls $installed $Action }
+            return Invoke-SetuoraDeployment $Action
+        }
         "uninstall" {
             $installed = Get-SetuoraInstalledRoot
             if ($installed -ne $ApplicationRoot) {
@@ -377,9 +388,11 @@ function Show-SetuoraMenu {
         Write-Host "[1] Start"
         Write-Host "[2] Stop"
         Write-Host "[3] Uninstall (keeps a recovery backup)"
+        Write-Host "[4] Allow other PCs on this local network (LAN on)"
+        Write-Host "[5] This computer only (LAN off)"
         $selection = Read-Host "Choose (close this window to exit)"
         $action = switch ($selection) {
-            "1" { "start" }; "2" { "stop" }; "3" { "uninstall" }; default { "" }
+            "1" { "start" }; "2" { "stop" }; "3" { "uninstall" }; "4" { "lan-on" }; "5" { "lan-off" }; default { "" }
         }
         if (-not $action) { Write-Host "Choose a listed number." -ForegroundColor Yellow; continue }
         try {

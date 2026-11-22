@@ -33,6 +33,9 @@ TAILSCALE_URL_SETTING = "SETUORA_TAILSCALE_URL"
 NODE_PATH = "/api/v1/"
 DEFAULT_WEB_PORT = 8000
 PORT_PATH = PROJECT_ROOT / "runtime-port.txt"
+LAN_SETTING = "SETUORA_LAN_ACCESS"
+LAN_FIREWALL_RULE = "Setuora-Master-LAN"
+LAN_STATE_PATH = PROJECT_ROOT / "runtime-lan.txt"
 UNSAFE_PASSWORDS = {
     "",
     "admin123",
@@ -118,6 +121,210 @@ def _node_target(port: int | None = None) -> str:
 
 def _local_url(port: int | None = None) -> str:
     return f"http://127.0.0.1:{port or _web_port()}"
+
+
+def _lan_enabled(values: dict[str, str] | None = None) -> bool:
+    if values is None:
+        _, values = _read_env()
+    return values.get(LAN_SETTING, "false").strip().lower() == "true"
+
+
+def _bind_host(values: dict[str, str] | None = None) -> str:
+    return "0.0.0.0" if _lan_enabled(values) else "127.0.0.1"  # noqa: S104  # nosec B104
+
+
+def _powershell_json(script: str) -> list[object]:
+    result = _run(["powershell.exe", "-NoProfile", "-Command", script], capture=True, check=False)
+    try:
+        raw = json.loads(result.stdout or "[]")
+    except ValueError:
+        return []
+    if raw is None:
+        return []
+    return raw if isinstance(raw, list) else [raw]
+
+
+def _usable_lan_address(address: str) -> bool:
+    parts = address.split(".")
+    if len(parts) != 4 or not all(part.isdigit() and int(part) <= 255 for part in parts):
+        return False
+    first, second = int(parts[0]), int(parts[1])
+    if first == 127 or (first == 169 and second == 254):
+        return False
+    # Tailscale addresses use the 100.64.0.0/10 range; Lite reaches Master there over HTTPS.
+    return not (first == 100 and 64 <= second <= 127)
+
+
+def _lan_addresses() -> list[str]:
+    """Return this PC's usable LAN IPv4 addresses (no loopback, APIPA or Tailscale)."""
+    items = _powershell_json(
+        "ConvertTo-Json -Compress -InputObject @(Get-NetIPAddress -AddressFamily IPv4 "
+        "-AddressState Preferred -ErrorAction SilentlyContinue | "
+        "Select-Object -ExpandProperty IPAddress)"
+    )
+    return sorted({str(item).strip() for item in items if _usable_lan_address(str(item).strip())})
+
+
+def _lan_urls(port: int | None = None) -> list[str]:
+    return [f"http://{address}:{port or _web_port()}" for address in _lan_addresses()]
+
+
+def _remove_lan_firewall_rule() -> None:
+    script = (
+        f"Get-NetFirewallRule -Name '{LAN_FIREWALL_RULE}' -ErrorAction SilentlyContinue "
+        "| Remove-NetFirewallRule -ErrorAction Stop"
+    )
+    # Closing a rule that does not exist (or cannot be read) must not block Start or Stop.
+    _run(["powershell.exe", "-NoProfile", "-Command", script], check=False, capture=True)
+
+
+def _apply_lan_access() -> None:
+    """Open or close local-network access to match SETUORA_LAN_ACCESS before the task runs."""
+    _, values = _read_env()
+    _remove_lan_firewall_rule()
+    # Status runs without Administrator rights and cannot read .env, so publish the mode.
+    LAN_STATE_PATH.write_text(f"{str(_lan_enabled(values)).lower()}\n", encoding="ascii")
+    if not _lan_enabled(values):
+        return
+    port = _web_port(values)
+    # Inbound only from the local subnet, and only on Private or Domain networks.
+    script = (
+        f"New-NetFirewallRule -Name '{LAN_FIREWALL_RULE}' "
+        "-DisplayName 'Setuora Master (local network)' -Direction Inbound -Action Allow "
+        f"-Protocol TCP -LocalPort {port} -RemoteAddress LocalSubnet "
+        "-Profile Private,Domain -ErrorAction Stop | Out-Null"
+    )
+    _run(["powershell.exe", "-NoProfile", "-Command", script])
+    trusted = [item.strip() for item in values.get("TRUSTED_HOSTS", "").split(",") if item.strip()]
+    wanted = [*_lan_addresses(), socket.gethostname().strip().lower()]
+    missing = [host for host in wanted if host and host not in trusted]
+    if missing:
+        _write_env({"TRUSTED_HOSTS": ",".join([*trusted, *missing])})
+
+
+def _warn_if_public_network() -> None:
+    names = _powershell_json(
+        "ConvertTo-Json -Compress -InputObject @(Get-NetConnectionProfile "
+        "-ErrorAction SilentlyContinue | Where-Object NetworkCategory -eq 'Public' | "
+        "Select-Object -ExpandProperty Name)"
+    )
+    names = [str(item) for item in names if item]
+    if names:
+        print(
+            "Note: Windows marks these networks as Public, so other PCs cannot connect: "
+            + ", ".join(names)
+            + ". Set the network to Private in Windows Settings > Network to allow LAN access."
+        )
+
+
+def _print_addresses() -> None:
+    print(f"Local address (this computer only): {_local_url()}")
+    if not _lan_enabled():
+        print("LAN access is off; other computers cannot open Master.")
+        return
+    urls = _lan_urls()
+    if urls:
+        for url in urls:
+            print(f"Other PCs on this network: {url}")
+    else:
+        print("LAN access is on, but no local network address was found.")
+    _warn_if_public_network()
+
+
+_TALLY_PROBE_SCRIPT = """import sys, urllib.request
+from app.database import SessionLocal
+from app.services.settings import get_all_settings
+from app.services.tally_endpoint import build_tally_url
+try:
+    with SessionLocal() as db:
+        settings = get_all_settings(db)
+except Exception:
+    print("unknown")
+    sys.exit(0)
+try:
+    url = build_tally_url(settings)
+except ValueError:
+    print("unconfigured")
+    sys.exit(0)
+body = b"<ENVELOPE><HEADER><TALLYREQUEST>Export Data</TALLYREQUEST></HEADER></ENVELOPE>"
+try:
+    request = urllib.request.Request(url, data=body, method="POST")
+    with urllib.request.urlopen(request, timeout=4) as response:
+        response.read(256)
+    print("ok " + url)
+except Exception:
+    print("down " + url)
+"""
+
+
+def _tally_gateway_state() -> str:
+    """Return 'ok <url>', 'down <url>', 'unconfigured' or 'unknown' for Master's saved Tally gateway."""
+    if not _venv_python().is_file():
+        return "unknown"
+    try:
+        result = _run([str(_venv_python()), "-c", _TALLY_PROBE_SCRIPT], check=False, capture=True)
+    except OSError:
+        return "unknown"
+    lines = (result.stdout or "").strip().splitlines()
+    return lines[-1].strip() if result.returncode == 0 and lines else "unknown"
+
+
+def _tailscale_ipv4() -> str:
+    executable = _find_tailscale_executable()
+    if not executable:
+        return ""
+    try:
+        result = _run([executable, "ip", "-4"], check=False, capture=True)
+    except OSError:
+        return ""
+    return (result.stdout or "").strip().splitlines()[0].strip() if (result.stdout or "").strip() else ""
+
+
+def _print_startup_summary(port: int | None = None, lite_address: str = "") -> None:
+    """Show this Master's addresses so a Lite PC can be linked, plus Tally reachability."""
+    port = port or _web_port()
+    if not lite_address:
+        _, values = _read_env()
+        lite_address = values.get(TAILSCALE_URL_SETTING, "").strip()
+    lan_on = (
+        LAN_STATE_PATH.is_file()
+        and LAN_STATE_PATH.read_text(encoding="ascii").strip() == "true"
+    )
+    tally = _tally_gateway_state()
+    line = "=" * 64
+    print("")
+    print(line)
+    print("  SETUORA MASTER - CONNECTION DETAILS")
+    print(line)
+    print(f"  Computer name        : {socket.gethostname()}")
+    print(f"  Console (this PC)    : {_local_url(port)}")
+    lan_ips = _lan_addresses()
+    print(f"  LAN IP address       : {', '.join(lan_ips) if lan_ips else 'not found'}")
+    if lan_on:
+        for address in lan_ips:
+            print(f"  Console (LAN PCs)    : http://{address}:{port}")
+    else:
+        print("  Console (LAN PCs)    : off (menu option 4 turns it on)")
+    tailscale_ip = _tailscale_ipv4()
+    print(f"  Tailscale IP         : {tailscale_ip or 'not connected'}")
+    if lite_address:
+        print(f"  LITE MASTER ADDRESS  : {lite_address}")
+        print(f"  Lite API endpoint    : {lite_address}/api/v1/")
+    else:
+        print("  LITE MASTER ADDRESS  : unavailable (Tailscale offline) - choose Start again")
+    if tally.startswith("ok "):
+        print(f"  Tally gateway        : answering at {tally[3:]}")
+    elif tally.startswith("down "):
+        print(f"  Tally gateway        : NOT answering at {tally[5:]} - open Tally and enable its HTTP/XML port")
+    elif tally == "unconfigured":
+        print("  Tally gateway        : not configured - set Tally host and port in Settings")
+    else:
+        print("  Tally gateway        : could not be checked")
+    print(line)
+    print("  To link a Lite: Master > Franchises > Copy connection details,")
+    print("  then on Lite: Admin > Master connection > paste > Connect to Master.")
+    print(line)
+    print("")
 
 
 def _save_web_port(port: int) -> None:
@@ -367,7 +574,7 @@ def _ensure_task() -> None:
         _task("/Create", "/TN", TASK_NAME, "/XML", str(task_path), "/F")
 
 
-def _wait_for_health(timeout_seconds: int = 120) -> None:
+def _wait_for_health(timeout_seconds: int = 300) -> None:
     deadline = time.monotonic() + timeout_seconds
     url = _local_url() + "/health"
     while time.monotonic() < deadline:
@@ -424,7 +631,7 @@ def _is_own_listener(listener: dict[str, object]) -> bool:
     return (
         executable == expected
         and "-m uvicorn app.main:app" in command
-        and "--host 127.0.0.1" in command
+        and ("--host 127.0.0.1" in command or "--host 0.0.0.0" in command)  # nosec B104
         and re.search(rf"(?<!\S)--port\s+{_web_port()}(?!\d)", command) is not None
     )
 
@@ -441,7 +648,7 @@ def _release_setuora_port() -> None:
 def _can_bind_port(port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.bind(("127.0.0.1", port))
+            probe.bind((_bind_host(), port))
         return True
     except OSError:
         return False
@@ -555,7 +762,7 @@ def _tailscale_executable() -> str:
     print("Downloading the signed Tailscale installer from pkgs.tailscale.com...")
     with tempfile.TemporaryDirectory(prefix="setuora-tailscale-") as directory:
         installer = Path(directory) / "tailscale.msi"
-        with urllib.request.urlopen(url, timeout=60) as response, installer.open("wb") as target:  # noqa: S310  # nosec B310
+        with urllib.request.urlopen(url, timeout=60) as response, installer.open("wb") as target:  # nosec B310
             shutil.copyfileobj(response, target)
         signature_script = (
             "$signature = Get-AuthenticodeSignature -LiteralPath $args[0]; "
@@ -945,7 +1152,9 @@ def setup(_args: argparse.Namespace) -> None:
                     f"Setup repair failed ({exc}); Master also could not restart ({restart_exc})."
                 ) from exc
         raise
+    _apply_lan_access()
     _task("/Run", "/TN", TASK_NAME)
+    print(f"Waiting for Setuora Master to answer at {_local_url()} ...", flush=True)
     try:
         _wait_for_health()
         _write_env({"BOOTSTRAP_ADMIN_PASSWORD": ""})
@@ -964,7 +1173,9 @@ def setup(_args: argparse.Namespace) -> None:
             print(f"Cleanup: {stop_exc}")
         raise
     print("Setuora Master is healthy on Windows.")
-    print(f"Admin console: {_local_url()}")
+    if _lan_enabled():
+        _warn_if_public_network()
+    _print_startup_summary()
 
 
 def start(_args: argparse.Namespace) -> None:
@@ -982,13 +1193,18 @@ def start(_args: argparse.Namespace) -> None:
     _select_available_web_port()
     # Stop disables the boot task; re-enable it before running.
     _task("/Change", "/TN", TASK_NAME, "/ENABLE")
+    _apply_lan_access()
     _task("/Run", "/TN", TASK_NAME)
+    print(f"Waiting for Setuora Master to answer at {_local_url()} ...", flush=True)
     _wait_for_health()
     try:
         _configure_private_api(install=False)
     except TailscaleUnavailable as exc:
         print(f"Private Lite API is offline: {exc}")
     print(f"Setuora Master is running at {_local_url()}.")
+    if _lan_enabled():
+        _warn_if_public_network()
+    _print_startup_summary()
 
 
 def stop(_args: argparse.Namespace) -> None:
@@ -998,6 +1214,7 @@ def stop(_args: argparse.Namespace) -> None:
     # Stop, and a stopped Master stays stopped after Windows restarts.
     _task("/Change", "/TN", TASK_NAME, "/DISABLE", check=False)
     _task("/End", "/TN", TASK_NAME, check=False)
+    _remove_lan_firewall_rule()
     try:
         _wait_for_stop(timeout_seconds=3)
     except DeploymentError:
@@ -1028,8 +1245,13 @@ def status(_args: argparse.Namespace) -> None:
         )
     print("Setuora Master is running and its database is responding.")
     print(f"Open {_local_url(_public_web_port())} in your browser.")
+    lan_public = LAN_STATE_PATH.is_file() and LAN_STATE_PATH.read_text(encoding="ascii").strip() == "true"
+    if lan_public:
+        for url in _lan_urls(_public_web_port()):
+            print(f"Other PCs on this network: {url}")
     address = _check_private_api_status()
     print(f"Private Lite API is responding at {address}/api/v1/.")
+    _print_startup_summary(_public_web_port(), address)
 
 
 def logs(args: argparse.Namespace) -> None:
@@ -1085,7 +1307,7 @@ def run_server(_args: argparse.Namespace) -> None:
         "uvicorn",
         "app.main:app",
         "--host",
-        "127.0.0.1",
+        _bind_host(),
         "--port",
         str(port),
         "--workers",
@@ -1093,6 +1315,26 @@ def run_server(_args: argparse.Namespace) -> None:
         "--no-access-log",
     ]
     raise SystemExit(_run(command, check=False).returncode)
+
+
+def _set_lan_access(args: argparse.Namespace, enabled: bool) -> None:
+    _check_windows()
+    if not ENV_PATH.exists():
+        raise DeploymentError("Run `setuora.ps1 setup` first.")
+    _write_env({LAN_SETTING: "true" if enabled else "false"})
+    if enabled:
+        print("LAN access turned on. Restarting Setuora Master...")
+    else:
+        print("LAN access turned off. Restarting Setuora Master for this computer only...")
+    start(args)
+
+
+def lan_on(args: argparse.Namespace) -> None:
+    _set_lan_access(args, True)
+
+
+def lan_off(args: argparse.Namespace) -> None:
+    _set_lan_access(args, False)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1106,6 +1348,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("status", status, "show the Windows scheduled task state"),
         ("update", update, "update dependencies and restart"),
         ("run-server", run_server, "run the scheduled local web server"),
+        ("lan-on", lan_on, "allow other PCs on the local network to open Master"),
+        ("lan-off", lan_off, "allow only this computer to open Master"),
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.set_defaults(function=function)

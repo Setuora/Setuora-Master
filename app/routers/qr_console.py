@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date
 from uuid import uuid4
@@ -18,6 +19,17 @@ from app.auth import ADMIN_ROLES, require_user
 from app.database import get_db
 from app.models import FranchiseNode, NetworkStock, NodeCommand, Serial, WarehouseLevel
 from app.services.qr_allocation import allocate_qr_serials, get_or_create_franchise_product
+from app.services.settings import update_settings
+from app.services.tally_godown_qr import (
+    PLAN_KEY_PREFIX,
+    create_from_plan,
+    load_plan,
+    plan_from_stock,
+    read_godown_stock,
+    save_plan,
+)
+from app.services.tally_masters import TallyDataError
+from app.services.tally_products import active_tally_source
 from app.templates import templates
 
 router = APIRouter(prefix="/franchises", tags=["master-qr"])
@@ -56,7 +68,9 @@ def _recent_commands(db: Session, node: FranchiseNode) -> list[dict]:
     return [{"command": command, "payload": json.loads(command.payload_json)} for command in commands]
 
 
-def _render(request: Request, db: Session, user, node: FranchiseNode, *, error=None, values=None):
+def _render(
+    request: Request, db: Session, user, node: FranchiseNode, *, error=None, values=None, created=0, created_items=0
+):
     return templates.TemplateResponse(
         request,
         "master/qr_allocation.html",
@@ -69,6 +83,8 @@ def _render(request: Request, db: Session, user, node: FranchiseNode, *, error=N
             "request_id": str(uuid4()),
             "warehouse_levels": [level.value for level in WarehouseLevel],
             "commands": _recent_commands(db, node),
+            "created": created,
+            "created_items": created_items,
         },
         status_code=400 if error else 200,
         headers={"Cache-Control": "no-store"},
@@ -76,9 +92,11 @@ def _render(request: Request, db: Session, user, node: FranchiseNode, *, error=N
 
 
 @router.get("/{public_id}/qr")
-def qr_page(request: Request, public_id: str, db: Session = Depends(get_db)):
+def qr_page(
+    request: Request, public_id: str, created: int = 0, items: int = 0, db: Session = Depends(get_db)
+):
     user = require_user(request, db, roles=ADMIN_ROLES)
-    return _render(request, db, user, _node(db, public_id))
+    return _render(request, db, user, _node(db, public_id), created=created, created_items=items)
 
 
 @router.post("/{public_id}/qr")
@@ -157,6 +175,73 @@ def create_qr_allocation(
         )
         return _render(request, db, user, node, error=message, values=values)
     return RedirectResponse(f"/franchises/{public_id}/qr", status_code=303)
+
+
+def _render_tally_stock(request: Request, db: Session, user, node: FranchiseNode, *, error=None, message=None):
+    plan = load_plan(db, node)
+    lines = plan["lines"] if plan else []
+    return templates.TemplateResponse(
+        request,
+        "master/qr_tally_stock.html",
+        {
+            "request": request,
+            "user": user,
+            "node": node,
+            "plan": plan,
+            "lines": lines,
+            "total_to_create": sum(int(line["to_create"]) for line in lines),
+            "items_to_create": sum(1 for line in lines if int(line["to_create"]) > 0),
+            "error": error,
+            "message": message,
+        },
+        status_code=400 if error else 200,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/{public_id}/qr/tally-stock")
+def tally_stock_page(request: Request, public_id: str, message: str = "", db: Session = Depends(get_db)):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    return _render_tally_stock(request, db, user, _node(db, public_id), message=message or None)
+
+
+@router.post("/{public_id}/qr/tally-stock/load")
+async def tally_stock_load(request: Request, public_id: str, db: Session = Depends(get_db)):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    node = _node(db, public_id)
+    try:
+        config, company = active_tally_source(db)
+        quantities, items, skipped = await asyncio.to_thread(
+            read_godown_stock, config, company, node.tally_godown_name or ""
+        )
+    except TallyDataError as exc:
+        return _render_tally_stock(request, db, user, node, error=str(exc))
+    save_plan(db, node, plan_from_stock(db, node, quantities, items, skipped))
+    return RedirectResponse(f"/franchises/{public_id}/qr/tally-stock", status_code=303)
+
+
+@router.post("/{public_id}/qr/tally-stock/create")
+def tally_stock_create(
+    request: Request,
+    public_id: str,
+    token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = require_user(request, db, roles=ADMIN_ROLES)
+    node = _node(db, public_id)
+    plan = load_plan(db, node)
+    try:
+        if plan is None:
+            raise ValueError("Load the stock from Tally first.")
+        items, serials = create_from_plan(db, node, plan, token, created_by_id=user.id)
+    except (ValueError, IntegrityError) as exc:
+        db.rollback()
+        return _render_tally_stock(request, db, user, node, error=str(exc))
+    # The preview is used up; loading again shows only what is still missing.
+    update_settings(db, {PLAN_KEY_PREFIX + node.public_id: ""})
+    return RedirectResponse(
+        f"/franchises/{public_id}/qr?created={serials}&items={items}", status_code=303
+    )
 
 
 @router.get("/{public_id}/qr/{command_id}/labels")

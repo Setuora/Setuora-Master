@@ -64,7 +64,7 @@ def test_windows_controller_help_and_invalid_command_exit_codes(powershell):
     assert help_result.returncode == 0, help_result.stdout + help_result.stderr
     assert "Double-click setuora.bat" in help_result.stdout
     assert (
-        "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, help"
+        "Commands: start, stop, uninstall, setup, status, open, logs, preflight, update, lan-on, lan-off, help"
         in help_result.stdout
     )
     invalid_result = subprocess.run(  # noqa: S603

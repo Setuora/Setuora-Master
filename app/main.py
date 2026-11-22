@@ -28,16 +28,22 @@ from app.routers import (
     receipts,
     tally_check,
     tally_products,
+    tally_sync,
     users,
 )
 from app.routers import settings as settings_router
 from app.services.backup_worker import start_backup_worker, stop_backup_worker
 from app.services.bootstrap import bootstrap
 from app.services.schema import ensure_runtime_schema
+from app.services.sync_status import start_sync_status_worker, stop_sync_status_worker
 from app.services.sync_worker import start_retry_worker, stop_retry_worker
 from app.services.tally_product_sync_worker import (
     start_tally_product_sync_worker,
     stop_tally_product_sync_worker,
+)
+from app.services.tally_receipt_sync_worker import (
+    start_tally_receipt_sync_worker,
+    stop_tally_receipt_sync_worker,
 )
 
 
@@ -55,12 +61,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_retry_worker(app)
     start_backup_worker(app)
     start_tally_product_sync_worker(app)
+    start_tally_receipt_sync_worker(app)
+    start_sync_status_worker(app)
     try:
         yield
     finally:
+        await stop_sync_status_worker(app)
         await stop_retry_worker(app)
         await stop_backup_worker(app)
         await stop_tally_product_sync_worker(app)
+        await stop_tally_receipt_sync_worker(app)
 
 
 def create_app(app_mode: str | None = None) -> FastAPI:
@@ -91,6 +101,7 @@ def create_app(app_mode: str | None = None) -> FastAPI:
     app.include_router(settings_router.router)
     app.include_router(tally_check.router)
     app.include_router(tally_products.router)
+    app.include_router(tally_sync.router)
     app.include_router(maintenance.router)
     app.include_router(users.router)
 

@@ -112,6 +112,7 @@ class BatchType(str, Enum):
     SALES_RETURN = "SALES_RETURN"
     ISSUE = "ISSUE"
     QR_ASSIGNMENT = "QR_ASSIGNMENT"
+    STOCK_TRANSFER = "STOCK_TRANSFER"
 
 
 class GstTreatment(str, Enum):
@@ -432,6 +433,8 @@ class Batch(Base):
     tally_voucher_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     tally_voucher_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     tally_stock_location: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    # Stock journal transfers move stock out of this godown into tally_stock_location.
+    tally_source_location: Mapped[str | None] = mapped_column(String(180), nullable=True)
     tally_reference: Mapped[str | None] = mapped_column(String(180), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -779,6 +782,12 @@ class FranchiseNode(Base):
     location: Mapped[str] = mapped_column(String(180), index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     tally_godown_name: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    # Exact Tally voucher type names for this franchise; blank uses Master's defaults.
+    tally_receipt_voucher_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tally_sales_voucher_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tally_sales_return_voucher_type: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
     last_sequence: Mapped[int] = mapped_column(Integer, default=0)
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -1194,3 +1203,35 @@ class QrAllocation(Base):
     franchise: Mapped[FranchiseNode] = relationship()
     product: Mapped[Product] = relationship()
     created_by: Mapped[User | None] = relationship()
+
+
+class TallyReceipt(Base):
+    """A receipt voucher read from central Tally for one franchise."""
+
+    __tablename__ = "tally_receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    franchise_id: Mapped[int] = mapped_column(
+        ForeignKey("franchise_nodes.id", ondelete="CASCADE"), index=True
+    )
+    tally_guid: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    tally_master_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    tally_alter_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    voucher_type: Mapped[str] = mapped_column(String(80))
+    voucher_number: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    voucher_date: Mapped[date] = mapped_column(Date, index=True)
+    bank_ledger: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    total_amount: Mapped[float] = mapped_column(Float, default=0)
+    narration: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lines_json: Mapped[str] = mapped_column(Text, default="[]")
+    last_command_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    first_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+
+    franchise: Mapped[FranchiseNode] = relationship()
+
+    @property
+    def lines(self) -> list[dict[str, object]]:
+        return json.loads(self.lines_json or "[]")

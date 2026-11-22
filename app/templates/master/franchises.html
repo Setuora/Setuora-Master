@@ -65,7 +65,21 @@
             <small class="cell-date">{{ node.last_seen_at|report_date if node.last_seen_at else 'Waiting for Lite to connect' }}</small>
           </td>
           <td class="numeric">{{ node.last_sequence }}</td>
-          <td class="cell-wrap">{{ node.tally_godown_name or 'Use Master default' }}</td>
+          <td class="cell-wrap">
+            {{ node.tally_godown_name or 'Use Master default' }}
+            {% if node.tally_receipt_voucher_type or node.tally_sales_voucher_type %}<small>Receipts: {{ node.tally_receipt_voucher_type or '—' }} · Sales: {{ node.tally_sales_voucher_type or 'default' }}</small>{% endif %}
+            <details>
+              <summary>Tally voucher types</summary>
+              <form method="post" action="/franchises/{{ node.public_id }}/tally" class="stack">
+                <label>Tally godown<input name="tally_godown_name" value="{{ node.tally_godown_name or '' }}" maxlength="180"><small>Stock for this franchise is booked in this godown.</small></label>
+                <label>Receipt voucher type<input name="tally_receipt_voucher_type" value="{{ node.tally_receipt_voucher_type or '' }}" maxlength="80" placeholder="Recipets Chintamani Warehouse"><small>Receipts of this type are read from Tally and sent to this franchise.</small></label>
+                <label>Sales voucher type<input name="tally_sales_voucher_type" value="{{ node.tally_sales_voucher_type or '' }}" maxlength="80" placeholder="Chintamani Warehouse Sale"></label>
+                <label>Sales return voucher type<input name="tally_sales_return_voucher_type" value="{{ node.tally_sales_return_voucher_type or '' }}" maxlength="80" placeholder="CREDIT NOTE CHINTAMANI WAREHOUSE"></label>
+                <small>Type each name exactly as it appears in Tally. Leave blank to use Master's defaults.</small>
+                <div class="table-actions"><button class="button small" type="submit">Save Tally names</button></div>
+              </form>
+            </details>
+          </td>
           <td class="cell-wrap">
             {% if node.active %}
             <a class="button small" href="/franchises/{{ node.public_id }}/qr">Create QR codes</a>

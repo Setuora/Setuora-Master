@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}QR codes from Tally stock - {{ node.code }} - Setuora Master{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>QR codes from Tally stock</h1>
+    <p class="page-meta">{{ node.code }} · Tally godown {{ node.tally_godown_name or 'not set' }}</p>
+    <p class="muted">Setup phase: read every item's closing stock in this franchise's Tally godown, check the list, then create one QR code per piece. Lite receives them as stock on its next sync. Stock already held at this franchise is not created again.</p>
+  </div>
+  <a class="button" href="/franchises/{{ node.public_id }}/qr">Back to QR codes</a>
+</section>
+{% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if message %}<div class="alert" role="status">{{ message }}</div>{% endif %}
+
+<section class="panel">
+  <div class="section-title"><h2>1. Load stock from Tally</h2><span>Keep Tally open with the company loaded.</span></div>
+  <form method="post" action="/franchises/{{ node.public_id }}/qr/tally-stock/load" class="stack">
+    <p class="muted">Tally is read one item at a time, which takes about two minutes (longer the first time after Tally opens). Nothing is created yet.</p>
+    <div><button class="button primary" type="submit" {% if not node.active or not node.tally_godown_name %}disabled{% endif %}>Load {{ node.tally_godown_name or 'godown' }} stock from Tally</button></div>
+  </form>
+</section>
+
+{% if plan %}
+<section class="panel">
+  <div class="section-title">
+    <h2>2. Check and create</h2>
+    <span>Loaded {{ plan.created_at[:16]|replace('T', ' ') }} UTC · {{ lines|length }} items in Tally</span>
+  </div>
+  <form method="post" action="/franchises/{{ node.public_id }}/qr/tally-stock/create" class="stack">
+    <input type="hidden" name="token" value="{{ plan.token }}">
+    <p><strong>{{ total_to_create }}</strong> QR codes for <strong>{{ items_to_create }}</strong> items will be created and sent to {{ node.code }}'s Lite.</p>
+    <div><button class="button primary" type="submit" {% if not total_to_create %}disabled{% endif %}>Create {{ total_to_create }} QR codes</button></div>
+  </form>
+  {% if plan.mismatches %}<div class="alert error" role="alert">{{ plan.mismatches }} items hold more stock in Master/Lite than Tally shows in this godown. Check the transfers out of this godown in Tally for the rows marked MISMATCH.</div>
+  {% else %}<p class="muted">Reconciled: no item holds more in Master/Lite than Tally shows. Use this page again after any Tally stock transfer into this godown to create the extra QR codes.</p>{% endif %}
+  {% if plan.skipped %}<p class="muted">Not read (name contains a quote mark): {{ plan.skipped|join(', ') }}</p>{% endif %}
+  <div class="table-scroll"><table>
+    <thead><tr><th scope="col">Tally stock item</th><th scope="col" class="numeric">Tally stock</th><th scope="col" class="numeric">Labels</th><th scope="col" class="numeric">Already held</th><th scope="col" class="numeric">To create</th><th scope="col">Note</th></tr></thead>
+    <tbody>
+    {% for line in lines %}
+      <tr>
+        <td class="cell-wrap"><strong>{{ line.item }}</strong></td>
+        <td class="numeric">{{ '%g'|format(line.tally_quantity) }} {{ line.unit }}</td>
+        <td class="numeric">{{ line.labels }}</td>
+        <td class="numeric">{{ line.already_held }}</td>
+        <td class="numeric"><strong>{{ line.to_create }}</strong></td>
+        <td class="cell-wrap">{% if line.note.startswith('MISMATCH') %}<strong>{{ line.note }}</strong>{% else %}<small>{{ line.note }}</small>{% endif %}</td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="empty">Tally shows no stock in this godown.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endblock %}

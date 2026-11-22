@@ -7,9 +7,13 @@
     <p class="page-meta">{{ node.code }}</p>
     <p class="muted">Master allocates each QR serial and sends it to this franchise's Lite during its next sync. Print labels after creating them.</p>
   </div>
-  <a class="button" href="/franchises">Back to franchises</a>
+  <div class="actions">
+    <a class="button primary" href="/franchises/{{ node.public_id }}/qr/tally-stock">From Tally stock (all items)</a>
+    <a class="button" href="/franchises">Back to franchises</a>
+  </div>
 </section>
 {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+{% if created %}<div class="alert" role="status">Created {{ created }} QR codes for {{ created_items }} items. Lite receives them on its next sync.</div>{% endif %}
 <section class="panel">
   <div class="section-title"><h2>New allocation</h2><span>Up to 5,000 QR codes per request.</span></div>
   {% if not node.active %}<p class="alert error">Enable this franchise before allocating QR codes.</p>{% endif %}

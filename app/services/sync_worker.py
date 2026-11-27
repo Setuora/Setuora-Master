@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import SessionLocal
 from app.models import Batch, BatchItem, BatchStatus, Serial, SyncAttempt, utc_now
+from app.services.books_sync import BooksUnavailable, mirror_to_books
 from app.services.settings import get_all_settings, is_tally_enabled
 from app.services.tally import (
     SYNC_LEASE_MINUTES,
@@ -114,6 +115,10 @@ async def retry_worker_loop() -> None:
                     interval = 180
             await asyncio.sleep(interval)
             await asyncio.to_thread(retry_pending_batches)
+            try:
+                await asyncio.to_thread(mirror_to_books)
+            except BooksUnavailable as exc:
+                logger.warning("HNC Books mirror waiting: %s", exc)
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -35,6 +35,7 @@
     <dt>Status</dt><dd><span class="status {{ batch.status|lower }}">{{ batch.status|status_label }}</span></dd>
     <dt>Source reference</dt><dd class="cell-wrap">{{ event.reference or '—' }}</dd>
     <dt>Tally reference</dt><dd class="cell-wrap">{{ batch.tally_reference or '—' }}</dd>
+    <dt>HNC Books</dt><dd class="cell-wrap">{% if batch.books_error %}{{ batch.books_error }}{% elif batch.books_synced_at %}Posted {{ batch.books_synced_at|report_date }}{% else %}—{% endif %}</dd>
     <dt>Retry count</dt><dd>{{ batch.retry_count }}</dd>
     <dt>Last error</dt><dd class="cell-wrap">{{ batch.last_error or '—' }}</dd>
   </dl>

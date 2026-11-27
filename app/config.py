@@ -111,6 +111,11 @@ class Settings:
             os.getenv("NODE_API_MAX_BODY_BYTES", str(5 * 1024 * 1024))
         )
         self.franchise_offline_minutes: int = int(os.getenv("FRANCHISE_OFFLINE_MINUTES", "15"))
+        # HNC Books mirror; off unless all three are set.
+        self.books_url: str = os.getenv("BOOKS_URL", "").strip()
+        self.books_username: str = os.getenv("BOOKS_USERNAME", "").strip()
+        self.books_password: str = os.getenv("BOOKS_PASSWORD", "")
+        self.books_mirror_from: str = os.getenv("BOOKS_MIRROR_FROM", "").strip()
         self.sftp_sync_enabled: bool = _flag("SFTP_SYNC_ENABLED", "false")
         self.sftp_exchange_root: str = os.getenv("SFTP_EXCHANGE_ROOT", "./data/sftp").strip()
         self.sftp_sync_interval_seconds: int = max(

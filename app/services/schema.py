@@ -68,6 +68,12 @@ def ensure_runtime_schema(target_engine: Engine | None = None) -> None:
                     "CREATE INDEX IF NOT EXISTS ix_batches_sync_started_at ON batches (sync_started_at)"
                 )
             )
+        if "books_synced_at" not in columns:
+            connection.execute(text("ALTER TABLE batches ADD COLUMN books_synced_at DATETIME"))
+        if "books_error" not in columns:
+            connection.execute(text("ALTER TABLE batches ADD COLUMN books_error TEXT"))
+        if "books_tried_at" not in columns:
+            connection.execute(text("ALTER TABLE batches ADD COLUMN books_tried_at DATETIME"))
         if "audit_assignment_id" not in columns:
             connection.execute(text("ALTER TABLE batches ADD COLUMN audit_assignment_id INTEGER"))
             connection.execute(

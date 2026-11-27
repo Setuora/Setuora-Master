@@ -448,6 +448,10 @@ class Batch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # HNC Books mirror of the voucher Tally accepted (app/services/books_sync.py).
+    books_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    books_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    books_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="batches")
     audit_assignment: Mapped[AuditAssignment | None] = relationship(back_populates="batches")

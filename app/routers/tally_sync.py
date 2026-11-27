@@ -15,6 +15,7 @@ from app.auth import ADMIN_ROLES, require_user
 from app.database import get_db
 from app.models import Batch, BatchStatus, FranchiseNode, InboundEvent, TallyReceipt
 from app.services import tally_godown_qr as godown_qr
+from app.services.books_sync import BooksUnavailable, mirror_to_books
 from app.services.settings import get_setting, is_tally_enabled
 from app.services.sync_worker import retry_pending_batches
 from app.services.tally import TALLY_XML_SUPPORTED_BATCH_TYPES
@@ -160,12 +161,18 @@ async def push_vouchers_now(request: Request, db: Session = Depends(get_db)):
     if not is_tally_enabled(db):
         return _redirect(error="Turn on Tally sync in Settings before sending vouchers.")
     processed = await asyncio.to_thread(retry_pending_batches, MANUAL_PUSH_LIMIT)
+    try:
+        # The manual push also retries vouchers Books refused before.
+        mirrored = await asyncio.to_thread(mirror_to_books, retry_rejected=True)
+        books_note = f" Copied {mirrored} to HNC Books." if mirrored else ""
+    except BooksUnavailable as exc:
+        books_note = f" HNC Books: {exc}"
     if processed == 0:
-        return _redirect(message="No vouchers were waiting for Tally.")
+        return _redirect(message="No vouchers were waiting for Tally." + books_note)
     return _redirect(
         message=(
             f"Sent {processed} voucher{'' if processed == 1 else 's'} to Tally. "
-            "Any that Tally rejected are listed in the Tally queue with the reason."
+            "Any that Tally rejected are listed in the Tally queue with the reason." + books_note
         )
     )
 
